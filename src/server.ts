@@ -24,9 +24,8 @@ const internalApiMiddleware: express.RequestHandler = (req: Request, res: Respon
   if (authCookie && getUserByUsername(authCookie)) {
     return next();
   }
-  // Otherwise, check for API key header (accept either header name)
-  const apiKeyHeader = req.headers['x-api-key'] || req.headers['x-internal-api-key'];
-  const providedKey = Array.isArray(apiKeyHeader) ? apiKeyHeader[0] : apiKeyHeader;
+  // Otherwise, check for API key header (only "x-api-key")
+  const providedKey = Array.isArray(req.headers['x-api-key']) ? req.headers['x-api-key'][0] : req.headers['x-api-key'];
   if (providedKey !== process.env.INTERNAL_API_KEY) {
     logger.warn('Unauthorized API access: missing or invalid API key', { ip: req.ip });
     res.status(401).json({ error: 'Unauthorized' });
