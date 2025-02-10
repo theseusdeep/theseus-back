@@ -49,9 +49,6 @@ The backend integrates with an external API to perform Google searches and scrap
    # Research parameters
    MAX_RESEARCH_BREADTH=10
    MAX_RESEARCH_DEPTH=5
-   # Login credentials
-   USER=<your_username>
-   PASSWORD=<your_password>
    # External API for Google search & web scraping
    SEARCH_API_KEY=<your_search_api_key>
    ```
