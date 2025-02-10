@@ -1,7 +1,7 @@
 import { generateObject } from 'ai';
 import { z } from 'zod';
 import { createModel, deepSeekModel } from './ai/providers';
-import { systemPrompt } from './prompt';
+import { feedbackPrompt } from './feedback_prompt';
 import { generateObjectSanitized } from './deep-research';
 import { logger } from './api/utils/logger';
 
@@ -30,7 +30,7 @@ export async function generateFeedback({
     try {
       userFeedback = await generateObjectSanitized({
         model: selectedModel ? createModel(selectedModel) : deepSeekModel,
-        system: systemPrompt(),
+        system: feedbackPrompt(),
         prompt: `Given the following query from the user, generate ${numQuestions} follow-up questions to clarify the research direction. Format your response as a JSON object with a "questions" array containing the questions as strings.
 
 Query: "${query}"
