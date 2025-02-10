@@ -1,7 +1,6 @@
-# DeepDive
+# Theseus back-end
 
-![DeepDive Interface]
-A enhanced fork of [Open Deep Research](https://github.com/dzhng/deep-research), an AI-powered research assistant that performs iterative, deep research on any topic by combining search engines, web scraping, and large language models.
+An enhanced fork of [Open Deep Research](https://github.com/dzhng/deep-research), an AI-powered research assistant that performs iterative, deep research on any topic by combining search engines, web scraping, and large language models.
 
 This project builds upon the original CLI tool by adding:
 - A modern web interface with real-time research progress
