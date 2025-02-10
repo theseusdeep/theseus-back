@@ -8,7 +8,7 @@ import { deepResearch, writeFinalReport } from './deep-research';
 import { generateFeedback } from './feedback';
 import { fetchModels } from './ai/providers';
 import { logger } from './api/utils/logger';
-import { getUserByUsername, updateUserTokens, createResearchRecord, updateResearchProgress, setResearchFinalReport, getResearchRecord } from './db';
+import { getUserByUsername, updateUserTokens, createResearchRecord, updateResearchProgress, setResearchFinalReport, getResearchRecord, updateResearchTokens } from './db';
 import bcrypt from 'bcrypt';
 
 const app = express();
@@ -22,7 +22,6 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-
 app.use(
   cors({
     origin: process.env.FRONTEND_URL || "https://theseus-deep.vercel.app",
@@ -33,17 +32,14 @@ app.use(
 app.use(express.json());
 app.use(cookieParser());
 
-
 const internalApiMiddleware: express.RequestHandler = (req: Request, res: Response, next: NextFunction): void => {
   if (req.path === '/login') {
     return next();
   }
-
   const authCookie = req.cookies?.auth;
   if (authCookie && getUserByUsername(authCookie)) {
     return next();
   }
-
   const providedKey = Array.isArray(req.headers['x-api-key'])
     ? req.headers['x-api-key'][0]
     : req.headers['x-api-key'];
@@ -102,7 +98,6 @@ app.post('/api/login', asyncHandler(async (req: Request, res: Response) => {
 app.use('/api/research', authMiddleware);
 app.use('/api/feedback', authMiddleware);
 app.use('/api/models', authMiddleware);
-
 
 app.get('/api/models', asyncHandler(async (_req: Request, res: Response) => {
   try {
@@ -169,6 +164,7 @@ app.post('/api/research', asyncHandler(async (req: Request, res: Response) => {
       const diffPrompt = endPrompt - startPrompt;
       const diffCompletion = endCompletion - startCompletion;
       updateUserTokens(user.username, diffPrompt, diffCompletion);
+      updateResearchTokens(researchId, diffPrompt, diffCompletion);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       updateResearchProgress(researchId, `ERROR:Research failed - ${errorMessage}`);
