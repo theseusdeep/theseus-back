@@ -14,11 +14,21 @@ const app = express();
 app.use(express.json());
 app.use(cookieParser());
 
-// New middleware to secure all API routes using INTERNAL_API_KEY
 const internalApiMiddleware: express.RequestHandler = (req: Request, res: Response, next: NextFunction): void => {
-  const internalApiKey = req.headers['x-internal-api-key'];
-  if (internalApiKey !== process.env.INTERNAL_API_KEY) {
-    logger.warn('Unauthorized API access: missing or invalid internal API key', { ip: req.ip });
+  // Allow login endpoint without API key
+  if (req.path === '/login') {
+    return next();
+  }
+  // Allow if the user is already authenticated via cookie
+  const authCookie = req.cookies?.auth;
+  if (authCookie && getUserByUsername(authCookie)) {
+    return next();
+  }
+  // Otherwise, check for API key header (accept either header name)
+  const apiKeyHeader = req.headers['x-api-key'] || req.headers['x-internal-api-key'];
+  const providedKey = Array.isArray(apiKeyHeader) ? apiKeyHeader[0] : apiKeyHeader;
+  if (providedKey !== process.env.INTERNAL_API_KEY) {
+    logger.warn('Unauthorized API access: missing or invalid API key', { ip: req.ip });
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
@@ -78,7 +88,6 @@ app.use('/api/feedback', authMiddleware);
 app.use('/api/models', authMiddleware);
 
 // Updated models endpoint: always returns valid JSON.
-// In case of error, returns a fallback models array.
 app.get('/api/models', asyncHandler(async (_req: Request, res: Response) => {
   try {
     const models = await fetchModels();
