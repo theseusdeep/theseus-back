@@ -3,6 +3,7 @@ dotenv.config({ override: true });
 
 import express, { Request, Response, NextFunction } from 'express';
 import cookieParser from 'cookie-parser';
+import cors from 'cors';
 import { deepResearch, writeFinalReport } from './deep-research';
 import { generateFeedback } from './feedback';
 import { fetchModels } from './ai/providers';
@@ -11,6 +12,23 @@ import { getUserByUsername, updateUserTokens } from './db';
 import bcrypt from 'bcrypt';
 
 const app = express();
+
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.method === 'OPTIONS') {
+    logger.info("Received preflight OPTIONS request", { url: req.url, headers: req.headers });
+  } else {
+    logger.info("Incoming request", { method: req.method, url: req.url });
+  }
+  next();
+});
+
+app.use(
+  cors({
+    origin: process.env.FRONTEND_URL || "https://theseus-deep.vercel.app",
+    credentials: true,
+  })
+);
+
 app.use(express.json());
 app.use(cookieParser());
 
@@ -25,7 +43,9 @@ const internalApiMiddleware: express.RequestHandler = (req: Request, res: Respon
     return next();
   }
   // Otherwise, check for API key header (only "x-api-key")
-  const providedKey = Array.isArray(req.headers['x-api-key']) ? req.headers['x-api-key'][0] : req.headers['x-api-key'];
+  const providedKey = Array.isArray(req.headers['x-api-key'])
+    ? req.headers['x-api-key'][0]
+    : req.headers['x-api-key'];
   if (providedKey !== process.env.INTERNAL_API_KEY) {
     logger.warn('Unauthorized API access: missing or invalid API key', { ip: req.ip });
     res.status(401).json({ error: 'Unauthorized' });
@@ -72,7 +92,8 @@ app.post('/api/login', asyncHandler(async (req: Request, res: Response) => {
   }
   const valid = await bcrypt.compare(password, user.password);
   if (valid) {
-    res.cookie('auth', username, { httpOnly: true });
+    // Set the auth cookie with cross-site attributes so that it is available to the front-end.
+    res.cookie('auth', username, { httpOnly: true, secure: true, sameSite: 'none' });
     logger.info('User logged in successfully', { username });
     res.json({ success: true });
   } else {
