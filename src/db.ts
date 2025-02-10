@@ -1,11 +1,11 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import bcrypt from 'bcrypt';
+import { randomUUID } from 'crypto';
 
 const dbPath = path.join(process.cwd(), 'users.db');
 const db = new Database(dbPath);
 
-// Create table if not exists
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -15,6 +15,18 @@ db.exec(`
     input_tokens_usage INTEGER DEFAULT 0,
     output_tokens_usage INTEGER DEFAULT 0,
     total_tokens_usage INTEGER DEFAULT 0
+  );
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS research (
+    researchId TEXT PRIMARY KEY,
+    requester TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    status TEXT NOT NULL,
+    progress TEXT,
+    report TEXT
   );
 `);
 
@@ -76,7 +88,6 @@ export function getAllUsers(): User[] {
   return stmt.all() as User[];
 }
 
-// New function to update a user's details
 export function updateUser(username: string, fields: {
   password?: string;
   last_research?: string;
@@ -87,7 +98,6 @@ export function updateUser(username: string, fields: {
   const user = getUserByUsername(username);
   if (!user) return undefined;
   
-  // Prepare new values, if not provided, use existing ones
   let newPassword = user.password;
   if (fields.password !== undefined) {
     const saltRounds = 10;
@@ -109,9 +119,82 @@ export function updateUser(username: string, fields: {
   return getUserByUsername(username);
 }
 
-// New function to delete a user
 export function deleteUser(username: string): boolean {
   const stmt = db.prepare("DELETE FROM users WHERE username = ?");
   const result = stmt.run(username);
   return result.changes > 0;
+}
+
+export function createResearchRecord(requester: string): string {
+  const researchId = randomUUID();
+  const now = new Date().toISOString();
+  const stmt = db.prepare(`
+    INSERT INTO research (researchId, requester, started_at, updated_at, status, progress)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  stmt.run(researchId, requester, now, now, 'in_progress', JSON.stringify([]));
+  return researchId;
+}
+
+export function updateResearchProgress(researchId: string, message: string): void {
+  const now = new Date().toISOString();
+  const selectStmt = db.prepare(`SELECT progress FROM research WHERE researchId = ?`);
+  const row = selectStmt.get(researchId);
+  let progressArray: string[] = [];
+  if (row && row.progress) {
+    try {
+      progressArray = JSON.parse(row.progress);
+    } catch (e) {
+      progressArray = [];
+    }
+  }
+  progressArray.push(message);
+  const updateStmt = db.prepare(`
+    UPDATE research 
+    SET progress = ?, updated_at = ? 
+    WHERE researchId = ?
+  `);
+  updateStmt.run(JSON.stringify(progressArray), now, researchId);
+}
+
+export function setResearchFinalReport(researchId: string, report: string): void {
+  const now = new Date().toISOString();
+  const status = report.startsWith('ERROR:') ? 'failed' : 'completed';
+  const stmt = db.prepare(`
+    UPDATE research 
+    SET report = ?, status = ?, updated_at = ? 
+    WHERE researchId = ?
+  `);
+  stmt.run(report, status, now, researchId);
+}
+
+export function getResearchRecord(researchId: string): {
+  researchId: string;
+  requester: string;
+  started_at: string;
+  updated_at: string;
+  status: string;
+  progress: string[];
+  report: string | null;
+} | undefined {
+  const stmt = db.prepare(`SELECT * FROM research WHERE researchId = ?`);
+  const row = stmt.get(researchId);
+  if (!row) return undefined;
+  let progressArray: string[] = [];
+  if (row.progress) {
+    try {
+      progressArray = JSON.parse(row.progress);
+    } catch (e) {
+      progressArray = [];
+    }
+  }
+  return {
+    researchId: row.researchId,
+    requester: row.requester,
+    started_at: row.started_at,
+    updated_at: row.updated_at,
+    status: row.status,
+    progress: progressArray,
+    report: row.report || null,
+  };
 }
