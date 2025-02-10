@@ -371,7 +371,7 @@ Required JSON format:
         reportMarkdown: z.string().describe('Final report on the topic in Markdown format with escaped newlines'),
       }),
       temperature: 0.7,
-      maxTokens: 2000,
+      maxTokens: 8192,
     });
     const safeResult = res.object as { reportMarkdown: string };
     const reportWithNewlines = safeResult.reportMarkdown.replace(/\\n/g, '\n');
