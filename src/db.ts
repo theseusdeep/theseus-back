@@ -26,7 +26,10 @@ db.exec(`
     updated_at TEXT NOT NULL,
     status TEXT NOT NULL,
     progress TEXT,
-    report TEXT
+    report TEXT,
+    input_tokens INTEGER DEFAULT 0,
+    output_tokens INTEGER DEFAULT 0,
+    total_tokens INTEGER DEFAULT 0
   );
 `);
 
@@ -168,6 +171,17 @@ export function setResearchFinalReport(researchId: string, report: string): void
   stmt.run(report, status, now, researchId);
 }
 
+export function updateResearchTokens(researchId: string, inputTokens: number, outputTokens: number): void {
+  const totalTokens = inputTokens + outputTokens;
+  const now = new Date().toISOString();
+  const stmt = db.prepare(`
+    UPDATE research 
+    SET input_tokens = ?, output_tokens = ?, total_tokens = ?, updated_at = ? 
+    WHERE researchId = ?
+  `);
+  stmt.run(inputTokens, outputTokens, totalTokens, now, researchId);
+}
+
 export function getResearchRecord(researchId: string): {
   researchId: string;
   requester: string;
@@ -176,6 +190,9 @@ export function getResearchRecord(researchId: string): {
   status: string;
   progress: string[];
   report: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
 } | undefined {
   const stmt = db.prepare(`SELECT * FROM research WHERE researchId = ?`);
   const row = stmt.get(researchId);
@@ -196,5 +213,8 @@ export function getResearchRecord(researchId: string): {
     status: row.status,
     progress: progressArray,
     report: row.report || null,
+    input_tokens: row.input_tokens || 0,
+    output_tokens: row.output_tokens || 0,
+    total_tokens: row.total_tokens || 0
   };
 }
