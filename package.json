@@ -21,7 +21,8 @@
     "ai": "^4.1.17",
     "@ai-sdk/deepseek": "^0.1.8",
     "@ai-sdk/openai": "^1.1.9",
-    "cloudflare-scraper": "^2.0.0"
+    "cloudflare-scraper": "^2.0.0",
+    "tsx": "^4.19.2"    
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
