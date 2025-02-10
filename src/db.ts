@@ -26,10 +26,7 @@ db.exec(`
     updated_at TEXT NOT NULL,
     status TEXT NOT NULL,
     progress TEXT,
-    report TEXT,
-    input_tokens_usage INTEGER DEFAULT 0,
-    output_tokens_usage INTEGER DEFAULT 0,
-    total_tokens_usage INTEGER DEFAULT 0
+    report TEXT
   );
 `);
 
@@ -100,21 +97,25 @@ export function updateUser(username: string, fields: {
 }): User | undefined {
   const user = getUserByUsername(username);
   if (!user) return undefined;
+  
   let newPassword = user.password;
   if (fields.password !== undefined) {
     const saltRounds = 10;
     newPassword = bcrypt.hashSync(fields.password, saltRounds);
   }
+  
   const newLastResearch = fields.last_research !== undefined ? fields.last_research : user.last_research;
   const newInputTokens = fields.input_tokens_usage !== undefined ? fields.input_tokens_usage : user.input_tokens_usage;
   const newOutputTokens = fields.output_tokens_usage !== undefined ? fields.output_tokens_usage : user.output_tokens_usage;
   const newTotalTokens = fields.total_tokens_usage !== undefined ? fields.total_tokens_usage : user.total_tokens_usage;
+
   const stmt = db.prepare(`
     UPDATE users
     SET password = ?, last_research = ?, input_tokens_usage = ?, output_tokens_usage = ?, total_tokens_usage = ?
     WHERE username = ?
   `);
   stmt.run(newPassword, newLastResearch, newInputTokens, newOutputTokens, newTotalTokens, username);
+  
   return getUserByUsername(username);
 }
 
@@ -165,17 +166,6 @@ export function setResearchFinalReport(researchId: string, report: string): void
     WHERE researchId = ?
   `);
   stmt.run(report, status, now, researchId);
-}
-
-export function updateResearchTokens(researchId: string, inputTokens: number, outputTokens: number): void {
-  const total = inputTokens + outputTokens;
-  const now = new Date().toISOString();
-  const stmt = db.prepare(`
-    UPDATE research 
-    SET input_tokens_usage = ?, output_tokens_usage = ?, total_tokens_usage = ?, updated_at = ? 
-    WHERE researchId = ?
-  `);
-  stmt.run(inputTokens, outputTokens, total, now, researchId);
 }
 
 export function getResearchRecord(researchId: string): {
