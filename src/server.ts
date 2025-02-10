@@ -8,7 +8,7 @@ import { deepResearch, writeFinalReport } from './deep-research';
 import { generateFeedback } from './feedback';
 import { fetchModels } from './ai/providers';
 import { logger } from './api/utils/logger';
-import { getUserByUsername, updateUserTokens } from './db';
+import { getUserByUsername, updateUserTokens, createResearchRecord, updateResearchProgress, setResearchFinalReport, getResearchRecord } from './db';
 import bcrypt from 'bcrypt';
 
 const app = express();
@@ -22,6 +22,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
+
 app.use(
   cors({
     origin: process.env.FRONTEND_URL || "https://theseus-deep.vercel.app",
@@ -32,17 +33,17 @@ app.use(
 app.use(express.json());
 app.use(cookieParser());
 
+
 const internalApiMiddleware: express.RequestHandler = (req: Request, res: Response, next: NextFunction): void => {
-  // Allow login endpoint without API key
   if (req.path === '/login') {
     return next();
   }
-  // Allow if the user is already authenticated via cookie
+
   const authCookie = req.cookies?.auth;
   if (authCookie && getUserByUsername(authCookie)) {
     return next();
   }
-  // Otherwise, check for API key header (only "x-api-key")
+
   const providedKey = Array.isArray(req.headers['x-api-key'])
     ? req.headers['x-api-key'][0]
     : req.headers['x-api-key'];
@@ -56,14 +57,12 @@ const internalApiMiddleware: express.RequestHandler = (req: Request, res: Respon
 
 app.use('/api', internalApiMiddleware);
 
-// Simple asyncHandler to wrap async route handlers
 function asyncHandler(fn: any): express.RequestHandler {
   return (req, res, next) => {
     Promise.resolve(fn(req, res, next)).catch(next);
   };
 }
 
-// Authentication middleware: only allows requests with a valid auth cookie.
 const authMiddleware: express.RequestHandler = (req, res, next) => {
   const username = req.cookies.auth;
   if (!username) {
@@ -81,7 +80,6 @@ const authMiddleware: express.RequestHandler = (req, res, next) => {
   next();
 };
 
-// Login endpoint
 app.post('/api/login', asyncHandler(async (req: Request, res: Response) => {
   const { username, password } = req.body;
   logger.debug('Login attempt', { providedUsername: username });
@@ -92,7 +90,6 @@ app.post('/api/login', asyncHandler(async (req: Request, res: Response) => {
   }
   const valid = await bcrypt.compare(password, user.password);
   if (valid) {
-    // Set the auth cookie with cross-site attributes so that it is available to the front-end.
     res.cookie('auth', username, { httpOnly: true, secure: true, sameSite: 'none' });
     logger.info('User logged in successfully', { username });
     res.json({ success: true });
@@ -102,12 +99,11 @@ app.post('/api/login', asyncHandler(async (req: Request, res: Response) => {
   }
 }));
 
-// Protect research-related endpoints with auth middleware.
 app.use('/api/research', authMiddleware);
 app.use('/api/feedback', authMiddleware);
 app.use('/api/models', authMiddleware);
 
-// Updated models endpoint: always returns valid JSON.
+
 app.get('/api/models', asyncHandler(async (_req: Request, res: Response) => {
   try {
     const models = await fetchModels();
@@ -128,61 +124,74 @@ app.get('/api/models', asyncHandler(async (_req: Request, res: Response) => {
   }
 }));
 
-// The research endpoint
 app.post('/api/research', asyncHandler(async (req: Request, res: Response) => {
   const { query, breadth, depth, selectedModel, concurrency, sites } = req.body;
-  // Get current user from auth middleware
   const user = (req as any).user;
-  // Record starting token usage
-  const startPrompt = logger.getTotalPromptTokens();
-  const startCompletion = logger.getTotalCompletionTokens();
+  const requester = user.username;
+  const researchId = createResearchRecord(requester);
 
-  res.setHeader('Content-Type', 'text/plain');
-  res.flushHeaders();
+  logger.info('Research request received', { researchId, query, breadth, depth, selectedModel, concurrency, sites });
+  res.json({ researchId });
 
-  const sendUpdate = (message: string) => {
-    res.write(message + '\n');
-  };
+  (async () => {
+    const startPrompt = logger.getTotalPromptTokens();
+    const startCompletion = logger.getTotalCompletionTokens();
 
-  try {
-    logger.info('Research request received', { query, breadth, depth, selectedModel, concurrency, sites });
-    const { learnings, visitedUrls } = await deepResearch({
-      query,
-      breadth,
-      depth,
-      selectedModel,
-      concurrency,
-      progressCallback: (msg: string) => sendUpdate(msg),
-      sites,
-    });
+    const progressCallback = (msg: string) => {
+      logger.info('Research progress update', { researchId, msg });
+      updateResearchProgress(researchId, msg);
+    };
 
-    const report = await writeFinalReport({
-      prompt: query,
-      learnings,
-      visitedUrls,
-      selectedModel,
-    });
+    try {
+      const { learnings, visitedUrls } = await deepResearch({
+        query,
+        breadth,
+        depth,
+        selectedModel,
+        concurrency,
+        progressCallback,
+        sites,
+      });
 
-    sendUpdate(`REPORT:${report}`);
-    logger.info('Research completed successfully');
+      const report = await writeFinalReport({
+        prompt: query,
+        learnings,
+        visitedUrls,
+        selectedModel,
+      });
 
-    // After research, calculate token usage difference
-    const endPrompt = logger.getTotalPromptTokens();
-    const endCompletion = logger.getTotalCompletionTokens();
-    const diffPrompt = endPrompt - startPrompt;
-    const diffCompletion = endCompletion - startCompletion;
-    // Update user tokens usage in the database
-    updateUserTokens(user.username, diffPrompt, diffCompletion);
-  } catch (error) {
-    logger.error('Research failed', { error });
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    sendUpdate('ERROR:Research failed - ' + errorMessage);
-  } finally {
-    res.end();
-  }
+      updateResearchProgress(researchId, `REPORT:${report}`);
+      setResearchFinalReport(researchId, report);
+
+      logger.info('Research completed successfully', { researchId });
+      const endPrompt = logger.getTotalPromptTokens();
+      const endCompletion = logger.getTotalCompletionTokens();
+      const diffPrompt = endPrompt - startPrompt;
+      const diffCompletion = endCompletion - startCompletion;
+      updateUserTokens(user.username, diffPrompt, diffCompletion);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      updateResearchProgress(researchId, `ERROR:Research failed - ${errorMessage}`);
+      setResearchFinalReport(researchId, `ERROR:Research failed - ${errorMessage}`);
+      logger.error('Research failed', { researchId, error });
+    }
+  })();
 }));
 
-// The feedback endpoint
+app.get('/api/research', asyncHandler(async (req: Request, res: Response) => {
+  const researchId = req.query.id;
+  if (!researchId || typeof researchId !== 'string') {
+    res.status(400).json({ error: 'Missing or invalid researchId' });
+    return;
+  }
+  const researchRecord = getResearchRecord(researchId);
+  if (!researchRecord) {
+    res.status(404).json({ error: 'Research record not found' });
+    return;
+  }
+  res.json(researchRecord);
+}));
+
 app.post('/api/feedback', asyncHandler(async (req: Request, res: Response) => {
   const { query, selectedModel } = req.body;
   try {
