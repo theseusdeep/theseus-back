@@ -1,0 +1,39 @@
+{
+  "name": "venice-deepdive-backend",
+  "version": "0.0.1",
+  "main": "src/server.ts",
+  "scripts": {
+    "format": "prettier --write \"src/**/*.{ts,tsx}\"",
+    "dev": "tsx --env-file=.env.local src/server.ts"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "cookie-parser": "^1.4.6",
+    "dotenv": "^16.0.3",
+    "bcrypt": "^5.1.0",
+    "better-sqlite3": "^11.8.1",
+    "google-it": "^1.6.4",
+    "js-tiktoken": "^1.0.17",
+    "lodash-es": "^4.17.21",
+    "marked": "^15.0.6",
+    "p-limit": "^6.2.0",
+    "zod": "^3.24.1",
+    "ai": "^4.1.17",
+    "@ai-sdk/deepseek": "^0.1.8",
+    "@ai-sdk/openai": "^1.1.9",
+    "cloudflare-scraper": "^2.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.0",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/cookie-parser": "^1.4.3",
+    "@types/lodash-es": "^4.17.12",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "prettier": "^3.4.2"
+  },
+  "engines": {
+    "node": "22.x"
+  }
+}
