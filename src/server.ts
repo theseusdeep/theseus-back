@@ -8,7 +8,7 @@ import { deepResearch, writeFinalReport } from './deep-research';
 import { generateFeedback } from './feedback';
 import { fetchModels } from './ai/providers';
 import { logger } from './api/utils/logger';
-import { getUserByUsername, updateUserTokens, createResearchRecord, updateResearchProgress, setResearchFinalReport, updateResearchTokens, getResearchRecord } from './db';
+import { getUserByUsername, updateUserTokens, createResearchRecord, updateResearchProgress, setResearchFinalReport, getResearchRecord } from './db';
 import bcrypt from 'bcrypt';
 
 const app = express();
@@ -22,6 +22,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
+
 app.use(
   cors({
     origin: process.env.FRONTEND_URL || "https://theseus-deep.vercel.app",
@@ -32,14 +33,17 @@ app.use(
 app.use(express.json());
 app.use(cookieParser());
 
+
 const internalApiMiddleware: express.RequestHandler = (req: Request, res: Response, next: NextFunction): void => {
   if (req.path === '/login') {
     return next();
   }
+
   const authCookie = req.cookies?.auth;
   if (authCookie && getUserByUsername(authCookie)) {
     return next();
   }
+
   const providedKey = Array.isArray(req.headers['x-api-key'])
     ? req.headers['x-api-key'][0]
     : req.headers['x-api-key'];
@@ -99,6 +103,7 @@ app.use('/api/research', authMiddleware);
 app.use('/api/feedback', authMiddleware);
 app.use('/api/models', authMiddleware);
 
+
 app.get('/api/models', asyncHandler(async (_req: Request, res: Response) => {
   try {
     const models = await fetchModels();
@@ -124,15 +129,19 @@ app.post('/api/research', asyncHandler(async (req: Request, res: Response) => {
   const user = (req as any).user;
   const requester = user.username;
   const researchId = createResearchRecord(requester);
+
   logger.info('Research request received', { researchId, query, breadth, depth, selectedModel, concurrency, sites });
   res.json({ researchId });
+
   (async () => {
     const startPrompt = logger.getTotalPromptTokens();
     const startCompletion = logger.getTotalCompletionTokens();
+
     const progressCallback = (msg: string) => {
       logger.info('Research progress update', { researchId, msg });
       updateResearchProgress(researchId, msg);
     };
+
     try {
       const { learnings, visitedUrls } = await deepResearch({
         query,
@@ -143,21 +152,23 @@ app.post('/api/research', asyncHandler(async (req: Request, res: Response) => {
         progressCallback,
         sites,
       });
+
       const report = await writeFinalReport({
         prompt: query,
         learnings,
         visitedUrls,
         selectedModel,
       });
+
       updateResearchProgress(researchId, `REPORT:${report}`);
       setResearchFinalReport(researchId, report);
+
+      logger.info('Research completed successfully', { researchId });
       const endPrompt = logger.getTotalPromptTokens();
       const endCompletion = logger.getTotalCompletionTokens();
       const diffPrompt = endPrompt - startPrompt;
       const diffCompletion = endCompletion - startCompletion;
       updateUserTokens(user.username, diffPrompt, diffCompletion);
-      updateResearchTokens(researchId, diffPrompt, diffCompletion);
-      logger.info('Research completed successfully', { researchId });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       updateResearchProgress(researchId, `ERROR:Research failed - ${errorMessage}`);
