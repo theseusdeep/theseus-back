@@ -11,7 +11,7 @@
     "cookie-parser": "^1.4.6",
     "dotenv": "^16.0.3",
     "bcrypt": "^5.1.0",
-    "better-sqlite3": "^11.8.1",
+    "@neondatabase/serverless": "0.10.4",
     "google-it": "^1.6.4",
     "js-tiktoken": "^1.0.17",
     "lodash-es": "^4.17.21",
