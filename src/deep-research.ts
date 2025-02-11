@@ -339,6 +339,7 @@ export async function writeFinalReport({
 }) {
   try {
     let promptText = `Given the following prompt from the user, compile a hyper professional and detailed final research report on the topic using the provided learnings. The report must be thorough, insightful, and written in Markdown with explicit newline characters (\\n) for newlines.
+IMPORTANT: Do not include any URLs or hyperlinks in the body of the report; only use the real URLs provided in the citations section appended after your report.
 
 Prompt: "${prompt}"
 
