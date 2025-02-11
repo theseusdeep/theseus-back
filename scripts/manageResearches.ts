@@ -11,11 +11,7 @@
  *   tsx scripts/manageResearches.ts dump
  */
 
-import Database from "better-sqlite3";
-import path from "path";
-
-const dbPath = path.join(process.cwd(), "users.db");
-const db = new Database(dbPath);
+import { getAllResearches } from "../src/db";
 
 function printUsage() {
   console.log(`Usage:
@@ -49,11 +45,6 @@ function parseOptions(args: string[]): Record<string, string> {
   return options;
 }
 
-function getAllResearches() {
-  const stmt = db.prepare("SELECT * FROM research");
-  return stmt.all();
-}
-
 async function main() {
   const args = process.argv.slice(2);
   if (args.length === 0) {
@@ -66,7 +57,7 @@ async function main() {
   switch (command) {
     case "list":
       {
-        const researches = getAllResearches();
+        const researches = await getAllResearches();
         if (researches.length === 0) {
           console.log("No research records found.");
         } else {
@@ -76,7 +67,7 @@ async function main() {
       break;
     case "dump":
       {
-        const researches = getAllResearches();
+        const researches = await getAllResearches();
         console.log(JSON.stringify(researches, null, 2));
       }
       break;
