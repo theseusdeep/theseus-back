@@ -26,12 +26,20 @@ db.exec(`
     updated_at TEXT NOT NULL,
     status TEXT NOT NULL,
     progress TEXT,
-    report TEXT,
-    input_tokens INTEGER DEFAULT 0,
-    output_tokens INTEGER DEFAULT 0,
-    total_tokens INTEGER DEFAULT 0
+    report TEXT
   );
 `);
+
+function addColumnIfNotExists(table: string, column: string, definition: string) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!columns.some((col: any) => col.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
+addColumnIfNotExists("research", "input_tokens", "INTEGER DEFAULT 0");
+addColumnIfNotExists("research", "output_tokens", "INTEGER DEFAULT 0");
+addColumnIfNotExists("research", "total_tokens", "INTEGER DEFAULT 0");
 
 export interface User {
   id: number;
