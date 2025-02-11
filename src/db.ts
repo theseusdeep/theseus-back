@@ -23,7 +23,7 @@ async function initDb() {
     )
   `;
 
-  // Create research table
+  // Create research table with new column for initial query.
   await sql`
     CREATE TABLE IF NOT EXISTS research (
       researchId TEXT PRIMARY KEY,
@@ -32,7 +32,8 @@ async function initDb() {
       updated_at TEXT NOT NULL,
       status TEXT NOT NULL,
       progress TEXT,
-      report TEXT
+      report TEXT,
+      input_query TEXT NOT NULL
     )
   `;
 
@@ -42,6 +43,8 @@ async function initDb() {
   await sql`ALTER TABLE research ADD COLUMN IF NOT EXISTS total_tokens INTEGER DEFAULT 0`;
   await sql`ALTER TABLE research ADD COLUMN IF NOT EXISTS research_breadth INTEGER DEFAULT 0`;
   await sql`ALTER TABLE research ADD COLUMN IF NOT EXISTS research_depth INTEGER DEFAULT 0`;
+  // Ensure input_query column exists in case the table was created earlier
+  await sql`ALTER TABLE research ADD COLUMN IF NOT EXISTS input_query TEXT DEFAULT ''`;
 }
 
 initDb().catch(err => {
@@ -72,6 +75,7 @@ export interface ResearchRecord {
   total_tokens: number;
   research_breadth: number;
   research_depth: number;
+  input_query: string;
 }
 
 // User functions
@@ -161,12 +165,12 @@ export async function deleteUser(username: string): Promise<boolean> {
 }
 
 // Research functions
-export async function createResearchRecord(requester: string, breadth: number, depth: number): Promise<string> {
+export async function createResearchRecord(requester: string, breadth: number, depth: number, inputQuery: string): Promise<string> {
   const researchId = randomUUID();
   const now = new Date().toISOString();
   await sql`
-    INSERT INTO research (researchId, requester, started_at, updated_at, status, progress, research_breadth, research_depth)
-    VALUES (${researchId}, ${requester}, ${now}, ${now}, 'in_progress', ${JSON.stringify([])}, ${breadth}, ${depth})
+    INSERT INTO research (researchId, requester, started_at, updated_at, status, progress, research_breadth, research_depth, input_query)
+    VALUES (${researchId}, ${requester}, ${now}, ${now}, 'in_progress', ${JSON.stringify([])}, ${breadth}, ${depth}, ${inputQuery})
   `;
   return researchId;
 }
@@ -235,6 +239,7 @@ export async function getResearchRecord(researchId: string): Promise<ResearchRec
     total_tokens: row.total_tokens || 0,
     research_breadth: row.research_breadth || 0,
     research_depth: row.research_depth || 0,
+    input_query: row.input_query || '',
   };
 }
 
@@ -262,6 +267,37 @@ export async function getAllResearches(): Promise<ResearchRecord[]> {
       total_tokens: row.total_tokens || 0,
       research_breadth: row.research_breadth || 0,
       research_depth: row.research_depth || 0,
+      input_query: row.input_query || '',
+    };
+  });
+}
+
+// New function: get research history for a specific user
+export async function getResearchHistory(username: string): Promise<ResearchRecord[]> {
+  const rows = await sql`SELECT * FROM research WHERE requester = ${username} ORDER BY started_at DESC`;
+  return rows.map((row: any) => {
+    let progressArray: string[] = [];
+    if (row.progress) {
+      try {
+        progressArray = JSON.parse(row.progress);
+      } catch (e) {
+        progressArray = [];
+      }
+    }
+    return {
+      researchId: row.researchId,
+      requester: row.requester,
+      started_at: row.started_at,
+      updated_at: row.updated_at,
+      status: row.status,
+      progress: progressArray,
+      report: row.report || null,
+      input_tokens: row.input_tokens || 0,
+      output_tokens: row.output_tokens || 0,
+      total_tokens: row.total_tokens || 0,
+      research_breadth: row.research_breadth || 0,
+      research_depth: row.research_depth || 0,
+      input_query: row.input_query || '',
     };
   });
 }
