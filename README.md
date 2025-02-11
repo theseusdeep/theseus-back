@@ -27,7 +27,7 @@ All endpoints are mounted under `/api` and require authentication by one of the 
 - **Purpose:** Retrieve a list of available AI models.
 - **Authentication:** Requires either a valid login cookie or a correct API key.
 - **Response:** Returns a JSON array of model objects, each containing fields like `id`, `name`, `model_class`, `context_length`, and `max_completion_tokens`.
-- **DEPRECATED**
+- **DEPRECATED - NO USE**
 
 ### 3. **POST `/api/feedback`**
 - **Purpose:** Generate follow-up questions based on the user's research query.
