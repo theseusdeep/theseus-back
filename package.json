@@ -23,7 +23,7 @@
     "@ai-sdk/openai": "^1.1.9",
     "cloudflare-scraper": "^2.0.0",
     "tsx": "^4.19.2",
-    "cors": "^2.8.5",
+    "cors": "^2.8.5"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
