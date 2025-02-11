@@ -115,7 +115,10 @@ interface SerpResponse {
   queries: SerpQuery[];
 }
 
-// Take in user query, return a list of SERP queries.
+/**
+ * Updated function to generate SERP queries.
+ * It now instructs the assistant to produce balanced search queries that are neither too short nor too lengthy.
+ */
 async function generateSerpQueries({
   query,
   numQueries = 3,
@@ -128,7 +131,7 @@ async function generateSerpQueries({
   selectedModel?: string;
 }) {
   try {
-    const promptText = `Generate ${numQueries} search queries to research this topic. Return them in the exact JSON format shown below.
+    const promptText = `Generate ${numQueries} balanced and professional search queries to research the following topic. Each query should be concise yet descriptive (ideally between 5 to 10 words) and include a brief research goal for further investigation.
 
 Topic: "${query}"
 ${learnings ? `Previous learnings:\n${learnings.join('\n')}` : ''}
@@ -172,9 +175,7 @@ Required JSON format:
           .array(
             z.object({
               query: z.string().describe('The search query to use'),
-              researchGoal: z
-                .string()
-                .describe('Research goal and additional directions for this query'),
+              researchGoal: z.string().describe('Research goal and additional directions for this query'),
             }),
           )
           .min(1)
@@ -185,9 +186,7 @@ Required JSON format:
     });
 
     const serpResponse = res.object as SerpResponse;
-    logger.info(`Created ${serpResponse.queries.length} queries`, {
-      queries: serpResponse.queries,
-    });
+    logger.info(`Created ${serpResponse.queries.length} queries`, { queries: serpResponse.queries });
     return serpResponse.queries.slice(0, numQueries);
   } catch (error) {
     logger.error('Error generating SERP queries', { error });
@@ -208,6 +207,10 @@ Required JSON format:
   }
 }
 
+/**
+ * Processes SERP results by scraping URLs and generating key learnings and follow-up questions.
+ * The prompt instructs the assistant to produce a detailed, balanced analysis.
+ */
 async function processSerpResult({
   query,
   result,
@@ -221,28 +224,22 @@ async function processSerpResult({
   numFollowUpQuestions?: number;
   selectedModel?: string;
 }) {
-  const contentsPromises = result.map(async (url) => {
-    // We no longer fetch and parse HTML with cheerio here; instead we use our external scrape API.
-    return ''; // placeholder if needed (not used since we call googleService.scrape below)
-  });
-  // Use the external scraping API instead of fetching each URL individually.
   const rawContents = await googleService.scrape(result);
 
-  // Determine which URLs produced non-null content.
   const validIndexes: number[] = [];
   rawContents.forEach((content, index) => {
     if (content !== null) {
       validIndexes.push(index);
     }
   });
-  // Use non-null assertion since result should contain valid strings at these indexes.
+
   const validUrls = validIndexes.map(i => result[i]!);
 
   logger.info(`Ran "${query}", retrieved content for ${validUrls.length} URLs`);
 
   try {
     let trimmedContents = rawContents.map(content => content ?? '').join('\n\n');
-    let promptText = `Analyze the search results for "${query}" and generate ${numLearnings} key learnings and ${numFollowUpQuestions} follow-up questions. Return them in the exact JSON format shown below.
+    let promptText = `Analyze the search results for "${query}" and generate ${numLearnings} key learnings and ${numFollowUpQuestions} follow-up questions. Ensure that your analysis is detailed, balanced, and professional. Your follow-up questions should be clear and of moderate length.
 
 Search Results:
 ${trimmedContents}
@@ -267,7 +264,7 @@ Required JSON format:
       if (tokenCount <= getMaxContextTokens(selectedModel)) break;
       logger.warn(`Prompt too long (${tokenCount} tokens), trimming to ${trimSize} per content...`);
       const reTrimmed = rawContents.map(content => trimPrompt(content ?? '', trimSize)).join('\n\n');
-      promptText = `Analyze the search results for "${query}" and generate ${numLearnings} key learnings and ${numFollowUpQuestions} follow-up questions. Return them in the exact JSON format shown below.
+      promptText = `Analyze the search results for "${query}" and generate ${numLearnings} key learnings and ${numFollowUpQuestions} follow-up questions. Ensure that your analysis is detailed, balanced and professional.
 
 Search Results:
 ${reTrimmed}
@@ -325,6 +322,10 @@ Required JSON format:
   }
 }
 
+/**
+ * Generates the final research report.
+ * The prompt instructs the assistant to compile a hyper professional and detailed Markdown report.
+ */
 export async function writeFinalReport({
   prompt,
   learnings,
@@ -337,7 +338,7 @@ export async function writeFinalReport({
   selectedModel?: string;
 }) {
   try {
-    let promptText = `Given the following prompt from the user, write a final report on the topic using the learnings from research. Return the report in the exact JSON format shown below. Use \\n for newlines in the markdown.
+    let promptText = `Given the following prompt from the user, compile a hyper professional and detailed final research report on the topic using the provided learnings. The report must be thorough, insightful, and written in Markdown with explicit newline characters (\\n) for newlines.
 
 Prompt: "${prompt}"
 
@@ -346,7 +347,7 @@ ${learnings.map((learning, i) => `${i + 1}. ${learning}`).join('\n')}
 
 Required JSON format:
 {
-  "reportMarkdown": "# Research Report\\n\\n## Summary\\n\\nThis is an example summary...\\n\\n## Key Findings\\n\\n1. First finding\\n2. Second finding"
+  "reportMarkdown": "# Research Report\\n\\n## Summary\\n\\nYour summary here...\\n\\n## Key Findings\\n\\n1. First finding\\n2. Second finding"
 }`;
     const tokenCount = encoder.encode(promptText).length;
     logger.debug('writeFinalReport prompt token count', { tokenCount });
@@ -397,6 +398,7 @@ ${visitedUrls.map(url => `- ${url}`).join('\n')}`;
 /**
  * Modified deepResearch function with an optional progressCallback to send progress updates.
  * Added an optional sites parameter to restrict searches to specific websites.
+ * Also supports continuation research via previous context (learned so far).
  */
 export async function deepResearch({
   query,
