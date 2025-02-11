@@ -8,7 +8,7 @@ import { deepResearch, writeFinalReport } from './deep-research';
 import { generateFeedback } from './feedback';
 import { fetchModels } from './ai/providers';
 import { logger } from './api/utils/logger';
-import { getUserByUsername, updateUserTokens, createResearchRecord, updateResearchProgress, setResearchFinalReport, getResearchRecord, updateResearchTokens } from './db';
+import { getUserByUsername, updateUserTokens, createResearchRecord, updateResearchProgress, setResearchFinalReport, getResearchRecord, updateResearchTokens, getResearchHistory } from './db';
 import bcrypt from 'bcrypt';
 
 const app = express();
@@ -120,10 +120,11 @@ app.get('/api/models', asyncHandler(async (_req: Request, res: Response) => {
 }));
 
 app.post('/api/research', asyncHandler(async (req: Request, res: Response) => {
-  const { query, breadth, depth, selectedModel, concurrency, sites } = req.body;
+  const { query, breadth, depth, selectedModel, concurrency, sites, previousContext } = req.body;
   const user = (req as any).user;
   const requester = user.username;
-  const researchId = await createResearchRecord(requester, breadth, depth);
+  // Store the initial query in the research record
+  const researchId = await createResearchRecord(requester, breadth, depth, query);
 
   logger.info('Research request received', { researchId, query, breadth, depth, selectedModel, concurrency, sites });
   res.json({ researchId });
@@ -138,10 +139,15 @@ app.post('/api/research', asyncHandler(async (req: Request, res: Response) => {
     };
 
     try {
+      // If previousContext is provided, ensure it is an array.
+      const previousLearnings = previousContext 
+        ? (Array.isArray(previousContext) ? previousContext : [previousContext])
+        : [];
       const { learnings, visitedUrls } = await deepResearch({
         query,
         breadth,
         depth,
+        learnings: previousLearnings,
         selectedModel,
         concurrency,
         progressCallback,
@@ -186,6 +192,13 @@ app.get('/api/research', asyncHandler(async (req: Request, res: Response) => {
     return;
   }
   res.json(researchRecord);
+}));
+
+// New endpoint: research history for the current user
+app.get('/api/research/history', asyncHandler(async (req: Request, res: Response) => {
+  const user = (req as any).user;
+  const history = await getResearchHistory(user.username);
+  res.json(history);
 }));
 
 app.post('/api/feedback', asyncHandler(async (req: Request, res: Response) => {
