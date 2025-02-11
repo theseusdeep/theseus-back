@@ -32,12 +32,12 @@ app.use(
 app.use(express.json());
 app.use(cookieParser());
 
-const internalApiMiddleware: express.RequestHandler = (req: Request, res: Response, next: NextFunction): void => {
+const internalApiMiddleware: express.RequestHandler = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   if (req.path === '/login') {
     return next();
   }
   const authCookie = req.cookies?.auth;
-  if (authCookie && getUserByUsername(authCookie)) {
+  if (authCookie && await getUserByUsername(authCookie)) {
     return next();
   }
   const providedKey = Array.isArray(req.headers['x-api-key'])
@@ -59,14 +59,14 @@ function asyncHandler(fn: any): express.RequestHandler {
   };
 }
 
-const authMiddleware: express.RequestHandler = (req, res, next) => {
+const authMiddleware: express.RequestHandler = async (req, res, next) => {
   const username = req.cookies.auth;
   if (!username) {
     logger.warn('Unauthorized access attempt: no auth cookie', { ip: req.ip });
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
-  const user = getUserByUsername(username);
+  const user = await getUserByUsername(username);
   if (!user) {
     logger.warn('Unauthorized access attempt: invalid user', { username, ip: req.ip });
     res.status(401).json({ error: 'Unauthorized' });
@@ -79,7 +79,7 @@ const authMiddleware: express.RequestHandler = (req, res, next) => {
 app.post('/api/login', asyncHandler(async (req: Request, res: Response) => {
   const { username, password } = req.body;
   logger.debug('Login attempt', { providedUsername: username });
-  const user = getUserByUsername(username);
+  const user = await getUserByUsername(username);
   if (!user) {
     logger.warn('Invalid login credentials: user not found', { providedUsername: username });
     return res.status(401).json({ error: 'Invalid credentials' });
@@ -123,7 +123,7 @@ app.post('/api/research', asyncHandler(async (req: Request, res: Response) => {
   const { query, breadth, depth, selectedModel, concurrency, sites } = req.body;
   const user = (req as any).user;
   const requester = user.username;
-  const researchId = createResearchRecord(requester, breadth, depth);
+  const researchId = await createResearchRecord(requester, breadth, depth);
 
   logger.info('Research request received', { researchId, query, breadth, depth, selectedModel, concurrency, sites });
   res.json({ researchId });
@@ -180,7 +180,7 @@ app.get('/api/research', asyncHandler(async (req: Request, res: Response) => {
     res.status(400).json({ error: 'Missing or invalid researchId' });
     return;
   }
-  const researchRecord = getResearchRecord(researchId);
+  const researchRecord = await getResearchRecord(researchId);
   if (!researchRecord) {
     res.status(404).json({ error: 'Research record not found' });
     return;
