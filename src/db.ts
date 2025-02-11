@@ -40,6 +40,8 @@ function addColumnIfNotExists(table: string, column: string, definition: string)
 addColumnIfNotExists("research", "input_tokens", "INTEGER DEFAULT 0");
 addColumnIfNotExists("research", "output_tokens", "INTEGER DEFAULT 0");
 addColumnIfNotExists("research", "total_tokens", "INTEGER DEFAULT 0");
+addColumnIfNotExists("research", "research_breadth", "INTEGER DEFAULT 0");
+addColumnIfNotExists("research", "research_depth", "INTEGER DEFAULT 0");
 
 export interface User {
   id: number;
@@ -136,14 +138,14 @@ export function deleteUser(username: string): boolean {
   return result.changes > 0;
 }
 
-export function createResearchRecord(requester: string): string {
+export function createResearchRecord(requester: string, breadth: number, depth: number): string {
   const researchId = randomUUID();
   const now = new Date().toISOString();
   const stmt = db.prepare(`
-    INSERT INTO research (researchId, requester, started_at, updated_at, status, progress)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO research (researchId, requester, started_at, updated_at, status, progress, research_breadth, research_depth)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  stmt.run(researchId, requester, now, now, 'in_progress', JSON.stringify([]));
+  stmt.run(researchId, requester, now, now, 'in_progress', JSON.stringify([]), breadth, depth);
   return researchId;
 }
 
@@ -201,6 +203,8 @@ export function getResearchRecord(researchId: string): {
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;
+  research_breadth: number;
+  research_depth: number;
 } | undefined {
   const stmt = db.prepare(`SELECT * FROM research WHERE researchId = ?`);
   const row = stmt.get(researchId);
@@ -223,6 +227,8 @@ export function getResearchRecord(researchId: string): {
     report: row.report || null,
     input_tokens: row.input_tokens || 0,
     output_tokens: row.output_tokens || 0,
-    total_tokens: row.total_tokens || 0
+    total_tokens: row.total_tokens || 0,
+    research_breadth: row.research_breadth || 0,
+    research_depth: row.research_depth || 0
   };
 }
