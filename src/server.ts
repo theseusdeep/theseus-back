@@ -123,7 +123,7 @@ app.post('/api/research', asyncHandler(async (req: Request, res: Response) => {
   const { query, breadth, depth, selectedModel, concurrency, sites } = req.body;
   const user = (req as any).user;
   const requester = user.username;
-  const researchId = createResearchRecord(requester);
+  const researchId = createResearchRecord(requester, breadth, depth);
 
   logger.info('Research request received', { researchId, query, breadth, depth, selectedModel, concurrency, sites });
   res.json({ researchId });
