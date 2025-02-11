@@ -78,12 +78,12 @@ async function main() {
           printUsage();
           process.exit(1);
         }
-        const existingUser = getUserByUsername(username);
+        const existingUser = await getUserByUsername(username);
         if (existingUser) {
           console.error(`Error: User with username "${username}" already exists.`);
           process.exit(1);
         }
-        const user = createUser(username, password);
+        const user = await createUser(username, password);
         console.log("User created successfully:");
         console.log(user);
       }
@@ -128,7 +128,7 @@ async function main() {
         if (fields.input_tokens_usage !== undefined && fields.output_tokens_usage !== undefined) {
           fields.total_tokens_usage = fields.input_tokens_usage + fields.output_tokens_usage;
         }
-        const updatedUser = updateUser(username, fields);
+        const updatedUser = await updateUser(username, fields);
         if (!updatedUser) {
           console.error(`Error: User with username "${username}" not found.`);
           process.exit(1);
@@ -145,7 +145,7 @@ async function main() {
           printUsage();
           process.exit(1);
         }
-        const success = deleteUser(username);
+        const success = await deleteUser(username);
         if (success) {
           console.log(`User "${username}" deleted successfully.`);
         } else {
@@ -156,7 +156,7 @@ async function main() {
       break;
     case "list":
       {
-        const users = getAllUsers();
+        const users = await getAllUsers();
         if (users.length === 0) {
           console.log("No users found.");
         } else {
@@ -166,7 +166,7 @@ async function main() {
       break;
     case "dump":
       {
-        const users = getAllUsers();
+        const users = await getAllUsers();
         console.log(JSON.stringify(users, null, 2));
       }
       break;
