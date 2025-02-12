@@ -31,6 +31,7 @@ function getMaxConcurrency(modelId: string): number {
 export interface ResearchResult {
   learnings: string[];
   visitedUrls: string[];
+  topUrls: Array<{ url: string; description: string }>;
 }
 
 /**
@@ -217,12 +218,14 @@ async function processSerpResult({
   numLearnings = 3,
   numFollowUpQuestions = 3,
   selectedModel,
+  includeTopUrls = false,
 }: {
   query: string;
   result: string[];
   numLearnings?: number;
   numFollowUpQuestions?: number;
   selectedModel?: string;
+  includeTopUrls?: boolean;
 }) {
   const rawContents = await googleService.scrape(result);
 
@@ -239,11 +242,11 @@ async function processSerpResult({
 
   try {
     let trimmedContents = rawContents.map(content => content ?? '').join('\n\n');
-    let promptText = `Analyze the search results for "${query}" and generate ${numLearnings} key learnings and ${numFollowUpQuestions} follow-up questions. Ensure that your analysis is detailed, balanced, and professional. Your follow-up questions should be clear and of moderate length.
-
+    let promptText = `Analyze the search results for "${query}" and generate ${numLearnings} key learnings and ${numFollowUpQuestions} follow-up questions${includeTopUrls ? ' and identify the top 3 URLs that best match the query criteria, providing a brief description for each' : ''}. Ensure that your analysis is detailed, balanced, and professional. Your follow-up questions should be clear and of moderate length.${includeTopUrls ? ' Additionally, return a field "topUrls" as an array of objects with keys "url" and "description" representing the top recommendations.' : ''}
+  
 Search Results:
 ${trimmedContents}
-
+  
 Required JSON format:
 {
   "learnings": [
@@ -255,7 +258,10 @@ Required JSON format:
     "First follow-up question to explore further",
     "Second follow-up question to explore further",
     "Third follow-up question to explore further"
-  ]
+  ]${includeTopUrls ? `,
+  "topUrls": [
+    { "url": "http://example.com", "description": "Explanation why this URL is top" }
+  ]` : ''}
 }`;
     let tokenCount = encoder.encode(promptText).length;
     logger.debug('processSerpResult initial prompt token count', { tokenCount });
@@ -264,11 +270,11 @@ Required JSON format:
       if (tokenCount <= getMaxContextTokens(selectedModel)) break;
       logger.warn(`Prompt too long (${tokenCount} tokens), trimming to ${trimSize} per content...`);
       const reTrimmed = rawContents.map(content => trimPrompt(content ?? '', trimSize)).join('\n\n');
-      promptText = `Analyze the search results for "${query}" and generate ${numLearnings} key learnings and ${numFollowUpQuestions} follow-up questions. Ensure that your analysis is detailed, balanced and professional.
-
+      promptText = `Analyze the search results for "${query}" and generate ${numLearnings} key learnings and ${numFollowUpQuestions} follow-up questions${includeTopUrls ? ' and identify the top 3 URLs that best match the query criteria, providing a brief description for each' : ''}. Ensure that your analysis is detailed, balanced and professional.
+  
 Search Results:
 ${reTrimmed}
-
+  
 Required JSON format:
 {
   "learnings": [
@@ -280,7 +286,10 @@ Required JSON format:
     "First follow-up question to explore further",
     "Second follow-up question to explore further",
     "Third follow-up question to explore further"
-  ]
+  ]${includeTopUrls ? `,
+  "topUrls": [
+    { "url": "http://example.com", "description": "Explanation why this URL is top" }
+  ]` : ''}
 }`;
       tokenCount = encoder.encode(promptText).length;
       logger.debug(`processSerpResult prompt token count after trimming to ${trimSize}`, { tokenCount });
@@ -296,12 +305,18 @@ Required JSON format:
       schema: z.object({
         learnings: z.array(z.string()).describe('Key learnings from the search results'),
         followUpQuestions: z.array(z.string()).describe('Follow-up questions to explore the topic further'),
+        topUrls: z.array(z.object({ url: z.string(), description: z.string() })).optional(),
       }),
     });
-    const safeResult = res.object as { learnings: string[]; followUpQuestions: string[] };
+    const safeResult = res.object as {
+      learnings: string[];
+      followUpQuestions: string[];
+      topUrls?: Array<{ url: string; description: string }>;
+    };
     return {
       learnings: safeResult.learnings,
       followUpQuestions: safeResult.followUpQuestions,
+      topUrls: safeResult.topUrls || [],
       visitedUrls: validUrls,
     };
   } catch (error) {
@@ -317,6 +332,7 @@ Required JSON format:
         'What are the latest developments in this area?',
         'How does this compare to alternatives?',
       ].slice(0, numFollowUpQuestions),
+      topUrls: [],
       visitedUrls: validUrls,
     };
   }
@@ -331,20 +347,31 @@ export async function writeFinalReport({
   learnings,
   visitedUrls,
   selectedModel,
+  language,
+  topUrls,
 }: {
   prompt: string;
   learnings: string[];
   visitedUrls: string[];
   selectedModel?: string;
+  language?: string;
+  topUrls?: Array<{ url: string; description: string }>;
 }) {
   try {
-    let promptText = `Given the following prompt from the user, compile a hyper professional and detailed final research report on the topic using the provided learnings. The report must be thorough, insightful, and written in Markdown with explicit newline characters (\\n) for newlines.
+    let promptText = `Given the following prompt from the user, compile a hyper professional and detailed final research report on the topic using the provided learnings${topUrls && topUrls.length > 0 ? ' and top recommendations' : ''}. The report must be thorough, insightful, and written in Markdown with explicit newline characters (\\n) for newlines.
 IMPORTANT: Do not include any URLs or hyperlinks in the body of the report; only use the real URLs provided in the citations section appended after your report.
 
 Prompt: "${prompt}"
 
 Learnings from research:
-${learnings.map((learning, i) => `${i + 1}. ${learning}`).join('\n')}
+${learnings.map((learning, i) => `${i + 1}. ${learning}`).join('\n')}${
+  topUrls && topUrls.length > 0
+    ? `
+
+Top Recommendations:
+${topUrls.map((item, i) => `${i + 1}. ${item.url} - ${item.description}`).join('\n')}`
+    : ''
+}
 
 Required JSON format:
 {
@@ -367,7 +394,7 @@ Required JSON format:
     }
     const res = await generateObjectSanitized({
       model: selectedModel ? createModel(selectedModel) : deepSeekModel,
-      system: reportPrompt(),
+      system: reportPrompt(language),
       prompt: promptText,
       schema: z.object({
         reportMarkdown: z.string().describe('Final report on the topic in Markdown format with escaped newlines'),
@@ -377,9 +404,12 @@ Required JSON format:
     });
     const safeResult = res.object as { reportMarkdown: string };
     const reportWithNewlines = safeResult.reportMarkdown.replace(/\\n/g, '\n');
+    const topSection = topUrls && topUrls.length > 0
+      ? `\n\n## Top Recommendations\n\n${topUrls.map(item => `- <span class="break-words">${item.url}</span>: ${item.description}`).join('\n')}`
+      : '';
     const urlsSection = `\n\n## Citations\n\n${visitedUrls.map(url => `- <span class="break-words">${url}</span>`).join('\n')}`;
     logger.info('Final report generated');
-    return reportWithNewlines + urlsSection;
+    return reportWithNewlines + topSection + urlsSection;
   } catch (error) {
     logger.error('Error generating final report', { error });
     const fallbackReport = `# Research Report
@@ -444,17 +474,23 @@ export async function deepResearch({
           const urls = await googleService.googleSearch(serpQuery.query, 10, sites);
           progressCallback && progressCallback(`Found ${urls.length} results for "${serpQuery.query}". Processing...`);
           logger.info('Processing SERP result', { query: serpQuery.query, urlsCount: urls.length });
+          // Determine whether to include top URLs based on the query content
+          const lowerSerpQuery = serpQuery.query.toLowerCase();
+          const includeTopUrls = lowerSerpQuery.includes('best') && (lowerSerpQuery.includes('price') || lowerSerpQuery.includes('quality'));
           const newLearnings = await processSerpResult({
             query: serpQuery.query,
             result: urls,
             numFollowUpQuestions: Math.ceil(breadth / 2),
             selectedModel,
+            includeTopUrls,
           });
           progressCallback && progressCallback(`Processed "${serpQuery.query}" and generated ${newLearnings.learnings.length} learnings.`);
           const allLearnings = [...learnings, ...newLearnings.learnings];
           const allUrls: string[] = [...visitedUrls, ...newLearnings.visitedUrls].filter(
             (u): u is string => u !== undefined,
           );
+          // Collect topUrls from each SERP result
+          const currentTopUrls = newLearnings.topUrls || [];
           const newDepth = depth - 1;
           if (newDepth > 0) {
             logger.info('Researching deeper', { nextBreadth: Math.ceil(breadth / 2), nextDepth: newDepth });
@@ -463,7 +499,7 @@ export async function deepResearch({
             Previous research goal: ${serpQuery.researchGoal}
             Follow-up research directions: ${newLearnings.followUpQuestions.map(q => `\n${q}`).join('')}
           `.trim();
-            return deepResearch({
+            const deeperResult = await deepResearch({
               query: nextQuery,
               breadth: Math.ceil(breadth / 2),
               depth: newDepth,
@@ -474,10 +510,16 @@ export async function deepResearch({
               progressCallback,
               sites,
             });
+            return {
+              learnings: deeperResult.learnings,
+              visitedUrls: deeperResult.visitedUrls,
+              topUrls: [...currentTopUrls, ...deeperResult.topUrls],
+            };
           } else {
             return {
               learnings: allLearnings,
               visitedUrls: allUrls,
+              topUrls: currentTopUrls,
             };
           }
         } catch (e) {
@@ -485,23 +527,29 @@ export async function deepResearch({
           return {
             learnings: [],
             visitedUrls: [],
+            topUrls: [],
           };
         }
       })
     )
   );
 
+  const allLearnings = [...new Set(results.flatMap(r => r.learnings))];
+  const allVisitedUrls = [
+    ...new Set(results.flatMap(r => r.visitedUrls.filter((u): u is string => u !== undefined))),
+  ];
+  const allTopUrls = results.flatMap(r => r.topUrls);
+  const uniqueTopUrls = Array.from(new Map(allTopUrls.map(item => [item.url, item])).values());
+
   const finalResult: ResearchResult = {
-    learnings: [...new Set(results.flatMap(r => r.learnings))],
-    visitedUrls: [
-      ...new Set(
-        results.flatMap(r => r.visitedUrls.filter((u): u is string => u !== undefined)),
-      ),
-    ],
+    learnings: allLearnings,
+    visitedUrls: allVisitedUrls,
+    topUrls: uniqueTopUrls,
   };
   logger.info('deepResearch completed', {
     learningsCount: finalResult.learnings.length,
     visitedUrlsCount: finalResult.visitedUrls.length,
+    topUrlsCount: finalResult.topUrls.length,
   });
   return finalResult;
 }
