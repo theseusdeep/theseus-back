@@ -13,7 +13,7 @@ import bcrypt from 'bcrypt';
 
 const app = express();
 
-app.use((req: Request, res: Response, next: NextFunction) => {
+app.use((req: Request, res: Response, next: NextFunction): void => {
   if (req.method === 'OPTIONS') {
     logger.info("Received preflight OPTIONS request", { url: req.url, headers: req.headers });
   } else {
@@ -120,10 +120,9 @@ app.get('/api/models', asyncHandler(async (_req: Request, res: Response) => {
 }));
 
 app.post('/api/research', asyncHandler(async (req: Request, res: Response) => {
-  const { query, breadth, depth, selectedModel, concurrency, sites, previousContext } = req.body;
+  const { query, breadth, depth, selectedModel, concurrency, sites, previousContext, language } = req.body;
   const user = (req as any).user;
   const requester = user.username;
-  // Store the initial query in the research record
   const researchId = await createResearchRecord(requester, breadth, depth, query);
 
   logger.info('Research request received', { researchId, query, breadth, depth, selectedModel, concurrency, sites });
@@ -139,7 +138,6 @@ app.post('/api/research', asyncHandler(async (req: Request, res: Response) => {
     };
 
     try {
-      // If previousContext is provided, ensure it is an array.
       const previousLearnings = previousContext 
         ? (Array.isArray(previousContext) ? previousContext : [previousContext])
         : [];
@@ -159,6 +157,7 @@ app.post('/api/research', asyncHandler(async (req: Request, res: Response) => {
         learnings,
         visitedUrls,
         selectedModel,
+        language,
       });
 
       updateResearchProgress(researchId, `REPORT:${report}`);
@@ -194,7 +193,6 @@ app.get('/api/research', asyncHandler(async (req: Request, res: Response) => {
   res.json(researchRecord);
 }));
 
-// New endpoint: research history for the current user
 app.get('/api/research/history', asyncHandler(async (req: Request, res: Response) => {
   const user = (req as any).user;
   const history = await getResearchHistory(user.username);
@@ -205,8 +203,8 @@ app.post('/api/feedback', asyncHandler(async (req: Request, res: Response) => {
   const { query, selectedModel } = req.body;
   try {
     logger.info('Feedback request received', { query, selectedModel });
-    const questions = await generateFeedback({ query, selectedModel });
-    res.json(questions);
+    const feedback = await generateFeedback({ query, selectedModel });
+    res.json(feedback);
   } catch (error) {
     logger.error('Error generating feedback', { error });
     res.status(500).json({ error: 'Failed to generate feedback questions' });
