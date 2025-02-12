@@ -33,33 +33,19 @@ export interface ResearchResult {
   visitedUrls: string[];
 }
 
-/**
- * Updated sanitation helper.
- * First, remove any <think>...</think> blocks.
- * Then, if a "{" exists in the remainder, return the substring from the first "{" to the last "}" (if present).
- */
 export function sanitizeDeepSeekOutput(raw: string): string {
   const withoutThink = raw.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
   const firstBrace = withoutThink.indexOf('{');
   if (firstBrace === -1) {
     return withoutThink;
   }
-  // Find the last closing brace
   const lastBrace = withoutThink.lastIndexOf('}');
   if (lastBrace === -1 || lastBrace < firstBrace) {
-    // If no closing brace is found, return from the first brace onward
     return withoutThink.slice(firstBrace).trim();
   }
   return withoutThink.slice(firstBrace, lastBrace + 1).trim();
 }
 
-/**
- * A wrapper for model calls that ensures the Venice parameter is always included.
- * It also logs the system and user prompts.
- *
- * For the default model, we expect the API response to follow the chat completion format.
- * We extract the assistant message content, sanitize it, and parse it as JSON.
- */
 export async function generateObjectSanitized<T>(params: any): Promise<{ object: T }> {
   let res;
   logger.debug('generateObjectSanitized called', {
@@ -68,23 +54,18 @@ export async function generateObjectSanitized<T>(params: any): Promise<{ object:
     prompt: params.prompt,
   });
 
-  // Always force include_venice_system_prompt to false.
   params.venice_parameters = { include_venice_system_prompt: false };
 
-  // Call the model (our custom function returned from providers)
   res = await params.model(params);
 
   if (params.model.modelId === DEFAULT_MODEL) {
     logger.info('Received response from Venice API', { response: res });
-    // Expecting the response in Venice format:
-    // { choices: [ { message: { content: "..." }, ... } ], ... }
     const rawText = res.choices && res.choices[0]?.message?.content;
     if (!rawText) {
       throw new Error('No response text received from Venice API');
     }
     logger.debug('Raw text from Venice API', { rawText: rawText.substring(0, 300) });
     const sanitized = sanitizeDeepSeekOutput(rawText);
-    // Log a snippet and length of the sanitized text for debugging
     logger.debug('Sanitized text', {
       snippet: sanitized.substring(0, 200),
       length: sanitized.length,
@@ -115,10 +96,6 @@ interface SerpResponse {
   queries: SerpQuery[];
 }
 
-/**
- * Updated function to generate SERP queries.
- * It now instructs the assistant to produce balanced search queries that are neither too short nor too lengthy.
- */
 async function generateSerpQueries({
   query,
   numQueries = 3,
@@ -207,10 +184,6 @@ Required JSON format:
   }
 }
 
-/**
- * Processes SERP results by scraping URLs and generating key learnings and follow-up questions.
- * The prompt instructs the assistant to produce a detailed, balanced analysis.
- */
 async function processSerpResult({
   query,
   result,
@@ -239,7 +212,7 @@ async function processSerpResult({
 
   try {
     let trimmedContents = rawContents.map(content => content ?? '').join('\n\n');
-    let promptText = `Analyze the search results for "${query}" and generate ${numLearnings} key learnings and ${numFollowUpQuestions} follow-up questions. Ensure that your analysis is detailed, balanced, and professional. Your follow-up questions should be clear and of moderate length.
+    let promptText = `Analyze the search results for "${query}" and generate ${numLearnings} key learnings and ${numFollowUpQuestions} follow-up questions. Ensure that your analysis is detailed, balanced and professional.
 
 Search Results:
 ${trimmedContents}
@@ -322,33 +295,37 @@ Required JSON format:
   }
 }
 
-/**
- * Generates the final research report.
- * The prompt instructs the assistant to compile a hyper professional and detailed Markdown report.
- */
 export async function writeFinalReport({
   prompt,
   learnings,
   visitedUrls,
   selectedModel,
+  language,
 }: {
   prompt: string;
   learnings: string[];
   visitedUrls: string[];
   selectedModel?: string;
+  language?: string;
 }) {
   try {
-    let promptText = `Given the following prompt from the user, compile a hyper professional and detailed final research report on the topic using the provided learnings. The report must be thorough, insightful, and written in Markdown with explicit newline characters (\\n) for newlines.
-IMPORTANT: Do not include any URLs or hyperlinks in the body of the report; only use the real URLs provided in the citations section appended after your report.
+    let promptText = `Given the following research information, compile a hyper professional and detailed final research report on the topic using the provided learnings. The report must be thorough, insightful, and written in Markdown with explicit newline characters (\\n) for newlines.
+IMPORTANT: The report MUST be written in the detected language: "${language || 'English'}". Do not include any URLs or hyperlinks in the body of the report; only use the real URLs provided in the "Citations" section appended after your report.
 
-Prompt: "${prompt}"
+The report should be structured into the following sections:
+1. **Request**: Reproduce the user's original query along with the follow-up questions and answers.
+2. **Summary**: Provide a concise summary and conclusions of the research.
+3. **Key Findings**: List the main findings from the research.
+
+Input provided:
+User Request: "${prompt}"
 
 Learnings from research:
 ${learnings.map((learning, i) => `${i + 1}. ${learning}`).join('\n')}
 
 Required JSON format:
 {
-  "reportMarkdown": "# Research Report\\n\\n## Summary\\n\\nYour summary here...\\n\\n## Key Findings\\n\\n1. First finding\\n2. Second finding"
+  "reportMarkdown": "# Research Report\\n\\n## Request\\n\\n[User request here]\\n\\n## Summary\\n\\n[Your summary here...]\\n\\n## Key Findings\\n\\n1. First finding\\n2. Second finding"
 }`;
     const tokenCount = encoder.encode(promptText).length;
     logger.debug('writeFinalReport prompt token count', { tokenCount });
@@ -367,7 +344,7 @@ Required JSON format:
     }
     const res = await generateObjectSanitized({
       model: selectedModel ? createModel(selectedModel) : deepSeekModel,
-      system: reportPrompt(),
+      system: reportPrompt(language),
       prompt: promptText,
       schema: z.object({
         reportMarkdown: z.string().describe('Final report on the topic in Markdown format with escaped newlines'),
@@ -396,11 +373,6 @@ ${visitedUrls.map(url => `- ${url}`).join('\n')}`;
   }
 }
 
-/**
- * Modified deepResearch function with an optional progressCallback to send progress updates.
- * Added an optional sites parameter to restrict searches to specific websites.
- * Also supports continuation research via previous context (learned so far).
- */
 export async function deepResearch({
   query,
   breadth,
