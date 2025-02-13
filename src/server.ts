@@ -8,8 +8,24 @@ import { deepResearch, writeFinalReport } from './deep-research';
 import { generateFeedback } from './feedback';
 import { fetchModels } from './ai/providers';
 import { logger } from './api/utils/logger';
-import { getUserByUsername, updateUserTokens, createResearchRecord, updateResearchProgress, setResearchFinalReport, getResearchRecord, updateResearchTokens, getResearchHistory } from './db';
+import { 
+  getUserByUsername, 
+  updateUserTokens, 
+  createResearchRecord, 
+  updateResearchProgress, 
+  setResearchFinalReport, 
+  getResearchRecord, 
+  updateResearchTokens, 
+  getResearchHistory 
+} from './db';
 import bcrypt from 'bcrypt';
+
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>(resolve => setTimeout(() => resolve(fallback), ms))
+  ]);
+}
 
 const app = express();
 
@@ -141,7 +157,7 @@ app.post('/api/research', asyncHandler(async (req: Request, res: Response) => {
       const previousLearnings = previousContext 
         ? (Array.isArray(previousContext) ? previousContext : [previousContext])
         : [];
-      const { learnings, visitedUrls } = await deepResearch({
+      const researchPromise = deepResearch({
         query,
         breadth,
         depth,
@@ -151,14 +167,25 @@ app.post('/api/research', asyncHandler(async (req: Request, res: Response) => {
         progressCallback,
         sites,
       });
+      const researchTimeoutMs = 15 * 60 * 1000; // 15 minutes
+      const fallbackResult = { 
+        learnings: ["Fallback: Research timed out. Partial results may be incomplete."], 
+        visitedUrls: [], 
+        topUrls: [] 
+      };
+      const { learnings, visitedUrls, topUrls } = await withTimeout(researchPromise, researchTimeoutMs, fallbackResult);
 
-      const report = await writeFinalReport({
+      const reportPromise = writeFinalReport({
         prompt: query,
         learnings,
         visitedUrls,
         selectedModel,
         language,
+        topUrls,
       });
+      const reportTimeoutMs = 5 * 60 * 1000; // 5 minutes
+      const fallbackReport = `# Research Report\n\nFallback report generated due to timeout. Learnings: ${learnings.join(', ')}`;
+      const report = await withTimeout(reportPromise, reportTimeoutMs, fallbackReport);
 
       updateResearchProgress(researchId, `REPORT:${report}`);
       setResearchFinalReport(researchId, report);
