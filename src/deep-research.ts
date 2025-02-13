@@ -242,7 +242,7 @@ async function processSerpResult({
 
   try {
     let trimmedContents = rawContents.map(content => content ?? '').join('\n\n');
-    let promptText = `Analyze the search results for "${query}" and generate ${numLearnings} key learnings and ${numFollowUpQuestions} follow-up questions${includeTopUrls ? ' and identify the top 3 URLs that best match the query criteria, providing a brief description for each' : ''}. Ensure that your analysis is detailed, balanced, and professional. Your follow-up questions should be clear and of moderate length.${includeTopUrls ? ' Additionally, return a field "topUrls" as an array of objects with keys "url" and "description" representing the top recommendations.' : ''}
+    let promptText = `Analyze the search results for "${query}" and generate ${numLearnings} key learnings and ${numFollowUpQuestions} follow-up questions${includeTopUrls ? ' and identify candidate top recommendations from the results' : ''}. Ensure that your analysis is detailed, balanced, and professional. Your follow-up questions should be clear and of moderate length.${includeTopUrls ? ' Additionally, return a field "topUrls" as an array of objects with keys "url" and "description" representing candidate top recommendations.' : ''}
   
 Search Results:
 ${trimmedContents}
@@ -260,7 +260,7 @@ Required JSON format:
     "Third follow-up question to explore further"
   ]${includeTopUrls ? `,
   "topUrls": [
-    { "url": "http://example.com", "description": "Explanation why this URL is top" }
+    { "url": "http://example.com", "description": "Explanation why this URL is candidate" }
   ]` : ''}
 }`;
     let tokenCount = encoder.encode(promptText).length;
@@ -270,7 +270,7 @@ Required JSON format:
       if (tokenCount <= getMaxContextTokens(selectedModel)) break;
       logger.warn(`Prompt too long (${tokenCount} tokens), trimming to ${trimSize} per content...`);
       const reTrimmed = rawContents.map(content => trimPrompt(content ?? '', trimSize)).join('\n\n');
-      promptText = `Analyze the search results for "${query}" and generate ${numLearnings} key learnings and ${numFollowUpQuestions} follow-up questions${includeTopUrls ? ' and identify the top 3 URLs that best match the query criteria, providing a brief description for each' : ''}. Ensure that your analysis is detailed, balanced and professional.
+      promptText = `Analyze the search results for "${query}" and generate ${numLearnings} key learnings and ${numFollowUpQuestions} follow-up questions${includeTopUrls ? ' and identify candidate top recommendations from the results' : ''}. Ensure that your analysis is detailed, balanced and professional.
   
 Search Results:
 ${reTrimmed}
@@ -288,7 +288,7 @@ Required JSON format:
     "Third follow-up question to explore further"
   ]${includeTopUrls ? `,
   "topUrls": [
-    { "url": "http://example.com", "description": "Explanation why this URL is top" }
+    { "url": "http://example.com", "description": "Explanation why this URL is candidate" }
   ]` : ''}
 }`;
       tokenCount = encoder.encode(promptText).length;
@@ -427,6 +427,37 @@ ${visitedUrls.map(url => `- ${url}`).join('\n')}`;
 }
 
 /**
+ * Finalizes candidate top recommendations by performing a final LLM query to select the best ones.
+ * @param candidates Array of candidate recommendations.
+ * @param count Number of final recommendations desired (default 5 if not specified by the user).
+ * @param selectedModel Optional model identifier.
+ * @returns An array of final top recommendation objects.
+ */
+async function finalizeTopRecommendations(
+  candidates: Array<{ url: string; description: string }>,
+  count: number,
+  selectedModel?: string,
+): Promise<Array<{ url: string; description: string }>> {
+  const promptText = `You are a research assistant tasked with selecting the final best recommendations from the following candidate top recommendations. Consider quality, relevance, and reliability. Please select the final best ${count} recommendations.
+
+Candidate Recommendations:
+${JSON.stringify(candidates, null, 2)}
+
+Return the result as a JSON object with a key "finalTopUrls" that is an array of objects, each having "url" and "description".`;
+  const res = await generateObjectSanitized({
+    model: selectedModel ? createModel(selectedModel) : deepSeekModel,
+    system: systemPrompt(),
+    prompt: promptText,
+    schema: z.object({
+      finalTopUrls: z.array(z.object({ url: z.string(), description: z.string() })),
+    }),
+    temperature: 0.7,
+    maxTokens: 1000,
+  });
+  return res.object.finalTopUrls;
+}
+
+/**
  * Modified deepResearch function with an optional progressCallback to send progress updates.
  * Added an optional sites parameter to restrict searches to specific websites.
  * Also supports continuation research via previous context (learned so far).
@@ -541,10 +572,18 @@ export async function deepResearch({
   const allTopUrls = results.flatMap(r => r.topUrls);
   const uniqueTopUrls = Array.from(new Map(allTopUrls.map(item => [item.url, item])).values());
 
+  let finalTopUrls = uniqueTopUrls;
+  if (finalTopUrls.length > 0) {
+    // Check if the query specifies a number for top recommendations using a regex e.g., "top 3" or "top 7"
+    const match = query.match(/top\s+(\d+)/i);
+    const recommendedCount = match && match[1] ? parseInt(match[1]) : 5;
+    finalTopUrls = await finalizeTopRecommendations(uniqueTopUrls, recommendedCount, selectedModel);
+  }
+
   const finalResult: ResearchResult = {
     learnings: allLearnings,
     visitedUrls: allVisitedUrls,
-    topUrls: uniqueTopUrls,
+    topUrls: finalTopUrls,
   };
   logger.info('deepResearch completed', {
     learningsCount: finalResult.learnings.length,
