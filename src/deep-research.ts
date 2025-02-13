@@ -117,8 +117,8 @@ interface SerpResponse {
 }
 
 /**
- * Updated function to generate SERP queries.
- * It now instructs the assistant to produce balanced search queries that are neither too short nor too lengthy.
+ * Enhanced function to generate SERP queries.
+ * Produces rigorously crafted search queries with clear, actionable research goals.
  */
 async function generateSerpQueries({
   query,
@@ -132,21 +132,22 @@ async function generateSerpQueries({
   selectedModel?: string;
 }) {
   try {
-    const promptText = `Generate ${numQueries} balanced and professional search queries to research the following topic. Each query should be concise yet descriptive (ideally between 5 to 10 words) and include a brief research goal for further investigation.
-
+    const promptText = `Generate ${numQueries} professional, rigorously crafted, and innovative search queries to explore the following research topic. Each query should be concise (5 to 10 words) yet descriptive, and must be paired with a brief, actionable research goal that leverages modern analytical frameworks and adheres to industry best practices.
+    
 Topic: "${query}"
-${learnings ? `Previous learnings:\n${learnings.join('\n')}` : ''}
+${learnings ? `Previous insights:\n${learnings.join('\n')}` : ''}
+Ensure that the queries are directly aligned with the user's original intent and any provided feedback.
 
 Required JSON format:
 {
   "queries": [
     {
       "query": "example search query 1",
-      "researchGoal": "goal and additional research directions for query 1"
+      "researchGoal": "a precise and innovative research direction for query 1"
     },
     {
       "query": "example search query 2",
-      "researchGoal": "goal and additional research directions for query 2"
+      "researchGoal": "a precise and innovative research direction for query 2"
     }
   ]
 }`;
@@ -176,7 +177,7 @@ Required JSON format:
           .array(
             z.object({
               query: z.string().describe('The search query to use'),
-              researchGoal: z.string().describe('Research goal and additional directions for this query'),
+              researchGoal: z.string().describe('Precise and innovative research goal for this query'),
             }),
           )
           .min(1)
@@ -194,11 +195,11 @@ Required JSON format:
     return [
       {
         query: query,
-        researchGoal: 'Understand the basic concepts and current developments',
+        researchGoal: 'Explore basic concepts and current trends',
       },
       {
         query: `${query} latest developments`,
-        researchGoal: 'Focus on recent updates and changes in the field',
+        researchGoal: 'Focus on recent innovations and updates',
       },
       {
         query: `${query} detailed analysis`,
@@ -209,8 +210,8 @@ Required JSON format:
 }
 
 /**
- * Processes SERP results by scraping URLs and generating key learnings and follow-up questions.
- * The prompt instructs the assistant to produce a detailed, balanced analysis.
+ * Enhanced function to process SERP results.
+ * Analyzes search results to generate evidence‑based insights and thought‑provoking follow‑up questions.
  */
 async function processSerpResult({
   query,
@@ -242,25 +243,25 @@ async function processSerpResult({
 
   try {
     let trimmedContents = rawContents.map(content => content ?? '').join('\n\n');
-    let promptText = `Analyze the search results for "${query}" and generate ${numLearnings} key learnings and ${numFollowUpQuestions} follow-up questions${includeTopUrls ? ' and identify candidate top recommendations from the results' : ''}. Ensure that your analysis is detailed, balanced, and professional. Your follow-up questions should be clear and of moderate length.${includeTopUrls ? ' Additionally, return a field "topUrls" as an array of objects with keys "url" and "description" representing candidate top recommendations.' : ''}
-  
+    let promptText = `Conduct a rigorous and scholarly analysis of the following search results for "${query}". Generate ${numLearnings} key insights and ${numFollowUpQuestions} thought‑provoking follow‑up questions that are deeply grounded in current research trends and critical evaluation. Additionally, ensure that all insights and questions directly reflect the user's original research intent and any prior feedback.${includeTopUrls ? ' Also, identify candidate top recommendations with clear, evidence‑based justification.' : ''}
+
 Search Results:
 ${trimmedContents}
-  
+
 Required JSON format:
 {
   "learnings": [
-    "First key learning point about the topic",
-    "Second key learning point about the topic",
-    "Third key learning point about the topic"
+    "First key insight derived from the analysis",
+    "Second key insight derived from the analysis",
+    "Third key insight derived from the analysis"
   ],
   "followUpQuestions": [
-    "First follow-up question to explore further",
-    "Second follow-up question to explore further",
-    "Third follow-up question to explore further"
+    "First probing follow‑up question",
+    "Second probing follow‑up question",
+    "Third probing follow‑up question"
   ]${includeTopUrls ? `,
   "topUrls": [
-    { "url": "http://example.com", "description": "Explanation why this URL is candidate" }
+    { "url": "http://example.com", "description": "Evidence‑based justification for this recommendation" }
   ]` : ''}
 }`;
     let tokenCount = encoder.encode(promptText).length;
@@ -270,25 +271,25 @@ Required JSON format:
       if (tokenCount <= getMaxContextTokens(selectedModel)) break;
       logger.warn(`Prompt too long (${tokenCount} tokens), trimming to ${trimSize} per content...`);
       const reTrimmed = rawContents.map(content => trimPrompt(content ?? '', trimSize)).join('\n\n');
-      promptText = `Analyze the search results for "${query}" and generate ${numLearnings} key learnings and ${numFollowUpQuestions} follow-up questions${includeTopUrls ? ' and identify candidate top recommendations from the results' : ''}. Ensure that your analysis is detailed, balanced and professional.
-  
+      promptText = `Conduct a rigorous and scholarly analysis of the following search results for "${query}". Generate ${numLearnings} key insights and ${numFollowUpQuestions} thought‑provoking follow‑up questions that are deeply grounded in current research trends and critical evaluation.${includeTopUrls ? ' Also, identify candidate top recommendations with clear, evidence‑based justification.' : ''}
+
 Search Results:
 ${reTrimmed}
-  
+
 Required JSON format:
 {
   "learnings": [
-    "First key learning point about the topic",
-    "Second key learning point about the topic",
-    "Third key learning point about the topic"
+    "First key insight derived from the analysis",
+    "Second key insight derived from the analysis",
+    "Third key insight derived from the analysis"
   ],
   "followUpQuestions": [
-    "First follow-up question to explore further",
-    "Second follow-up question to explore further",
-    "Third follow-up question to explore further"
+    "First probing follow‑up question",
+    "Second probing follow‑up question",
+    "Third probing follow‑up question"
   ]${includeTopUrls ? `,
   "topUrls": [
-    { "url": "http://example.com", "description": "Explanation why this URL is candidate" }
+    { "url": "http://example.com", "description": "Evidence‑based justification for this recommendation" }
   ]` : ''}
 }`;
       tokenCount = encoder.encode(promptText).length;
@@ -301,10 +302,9 @@ Required JSON format:
       model: selectedModel ? createModel(selectedModel) : deepSeekModel,
       system: systemPrompt(),
       prompt: promptText,
-      maxTokens: 8192,
       schema: z.object({
-        learnings: z.array(z.string()).describe('Key learnings from the search results'),
-        followUpQuestions: z.array(z.string()).describe('Follow-up questions to explore the topic further'),
+        learnings: z.array(z.string()).describe('Key insights from the search results'),
+        followUpQuestions: z.array(z.string()).describe('Follow‑up questions to explore the topic further'),
         topUrls: z.array(z.object({ url: z.string(), description: z.string() })).optional(),
       }),
     });
@@ -323,14 +323,14 @@ Required JSON format:
     logger.error('Error processing SERP result', { error });
     return {
       learnings: [
-        `Found information about ${query}`,
-        'Additional research may be needed',
-        'Consider exploring related topics',
+        `Found preliminary insights about ${query}`,
+        'Additional research may be needed for deeper analysis',
+        'Consider exploring related areas for further information',
       ].slice(0, numLearnings),
       followUpQuestions: [
-        `What are the most important aspects of ${query}?`,
-        'What are the latest developments in this area?',
-        'How does this compare to alternatives?',
+        `What are the most critical aspects of ${query}?`,
+        'What recent developments impact this topic?',
+        'How does this compare with alternative perspectives?',
       ].slice(0, numFollowUpQuestions),
       topUrls: [],
       visitedUrls: validUrls,
@@ -339,8 +339,8 @@ Required JSON format:
 }
 
 /**
- * Generates the final research report.
- * The prompt instructs the assistant to compile a hyper professional and detailed Markdown report.
+ * Enhanced final report generator.
+ * Composes a comprehensive, scholarly research report that is detailed and professional.
  */
 export async function writeFinalReport({
   prompt,
@@ -358,25 +358,31 @@ export async function writeFinalReport({
   topUrls?: Array<{ url: string; description: string }>;
 }) {
   try {
-    let promptText = `Given the following prompt from the user, compile a hyper professional and detailed final research report on the topic using the provided learnings${topUrls && topUrls.length > 0 ? ' and top recommendations' : ''}. The report must be thorough, insightful, and written in Markdown with explicit newline characters (\\n) for newlines.
-IMPORTANT: Do not include any URLs or hyperlinks in the body of the report; only use the real URLs provided in the citations section appended after your report.
+    let promptText = `Based on the following user input and the aggregated research learnings, compose a comprehensive, scholarly research report that meets high professional standards and reflects state‑of‑the‑art analytical methodologies. The report must directly reflect and adhere to the user's original query and the subsequent feedback provided, ensuring that every key aspect and intention is thoroughly addressed.
 
-Prompt: "${prompt}"
+User Input (Original Query and Feedback):
+"${prompt}"
 
-Learnings from research:
-${learnings.map((learning, i) => `${i + 1}. ${learning}`).join('\n')}${
-  topUrls && topUrls.length > 0
-    ? `
+Research Learnings:
+${learnings.map((learning, i) => `${i + 1}. ${learning}`).join('\n')}
 
-Top Recommendations:
-${topUrls.map((item, i) => `${i + 1}. ${item.url} - ${item.description}`).join('\n')}`
-    : ''
-}
+In your report, include a dedicated section titled "User Intent and Inputs" that summarizes the user's original query and feedback responses, demonstrating a clear understanding of the research objectives.
 
-Required JSON format:
-{
-  "reportMarkdown": "# Research Report\\n\\n## Summary\\n\\nYour summary here...\\n\\n## Key Findings\\n\\n1. First finding\\n2. Second finding"
-}`;
+Structure the report in Markdown with the following sections:
+1. **Executive Summary**: A succinct overview of the research findings.
+2. **User Intent and Inputs**: A clear restatement and analysis of the user's original query and feedback.
+3. **Introduction**: Context, background, and the significance of the research topic.
+4. **Methodology**: A detailed explanation of the research approach and analytical techniques.
+5. **Key Insights**: In‑depth and critical findings derived from the research.
+6. **Recommendations**: Actionable strategies and directions for future research.
+7. **Conclusion**: A concise summary of the research outcomes and final reflections.
+8. **Citations**: A list of all URLs (without embedded hyperlinks) referenced in the research.
+
+IMPORTANT: Do not embed any URLs within the main content; include them only in the "Citations" section.
+
+Return the final report as a valid JSON object in the following format:
+{"reportMarkdown": "Your complete Markdown formatted report here with \\n for new lines."}
+`;
     const tokenCount = encoder.encode(promptText).length;
     logger.debug('writeFinalReport prompt token count', { tokenCount });
     if (tokenCount > getMaxContextTokens(selectedModel)) {
@@ -414,16 +420,20 @@ Required JSON format:
     logger.error('Error generating final report', { error });
     const fallbackReport = `# Research Report
 
-## Summary
+## Executive Summary
 ${prompt}
 
-## Key Findings
+## Key Insights
 ${learnings.map((learning, i) => `${i + 1}. ${learning}`).join('\n')}
 
 ## Citations
 ${visitedUrls.map(url => `- ${url}`).join('\n')}`;
     return fallbackReport;
   }
+}
+
+interface SerpCandidates {
+  finalTopUrls: Array<{ url: string; description: string }>;
 }
 
 /**
@@ -438,7 +448,7 @@ async function finalizeTopRecommendations(
   count: number,
   selectedModel?: string,
 ): Promise<Array<{ url: string; description: string }>> {
-  const promptText = `You are a research assistant tasked with selecting the final best recommendations from the following candidate top recommendations. Consider quality, relevance, and reliability. Please select the final best ${count} recommendations.
+  const promptText = `You are a research assistant tasked with selecting the final best recommendations from the following candidate recommendations. Consider quality, relevance, and reliability. Please select the final best ${count} recommendations.
 
 Candidate Recommendations:
 ${JSON.stringify(candidates, null, 2)}
@@ -459,7 +469,6 @@ Return the result as a JSON object with a key "finalTopUrls" that is an array of
 
 /**
  * Modified deepResearch function with an optional progressCallback to send progress updates.
- * Added an optional sites parameter to restrict searches to specific websites.
  * Also supports continuation research via previous context (learned so far).
  */
 export async function deepResearch({
@@ -515,7 +524,7 @@ export async function deepResearch({
             selectedModel,
             includeTopUrls,
           });
-          progressCallback && progressCallback(`Processed "${serpQuery.query}" and generated ${newLearnings.learnings.length} learnings.`);
+          progressCallback && progressCallback(`Processed "${serpQuery.query}" and generated ${newLearnings.learnings.length} insights.`);
           const allLearnings = [...learnings, ...newLearnings.learnings];
           const allUrls: string[] = [...visitedUrls, ...newLearnings.visitedUrls].filter(
             (u): u is string => u !== undefined,
