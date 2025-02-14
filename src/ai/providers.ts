@@ -127,6 +127,9 @@ export const o3MiniModel = VeniceAI('o3-mini', {
   reasoningEffort: 'medium',
   structuredOutputs: true,
 });
+export const summarizationModel = VeniceAI(process.env.VENICE_SUMMARIZATION_MODEL || 'venice-summarization-default', {
+  structuredOutputs: true,
+});
 
 const MinChunkSize = 140;
 export const encoder = getEncoding('o200k_base');
