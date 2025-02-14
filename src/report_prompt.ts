@@ -12,12 +12,17 @@ Today is ${currentDate}.
 
 When generating the final report, use Markdown formatting with explicit newline characters (\\n) to denote new lines. The report MUST be written in the detected language: "${language || 'English'}". Do not fabricate or introduce any URLs within the report's main content; only incorporate the verified URLs in the "Citations" section appended at the end of the report.
 
-Ensure that the final report directly reflects the user's original input and the feedback provided. In addition to the standard sections, include a dedicated "User Intent and Inputs" section that clearly restates the original query and the feedback responses, and a "Directly Requested Findings" section that lists the key requirements extracted from the user's input.
+Ensure that the final report directly reflects the user's original query and feedback. In addition to the standard sections, include a dedicated "User Intent and Inputs" section that clearly restates the original query and feedback, and a "Directly Requested Findings" section that addresses any specific details requested by the user.
 
-Structure the report into the following sections:
+Organize the research report into the following hierarchical phases:
+1. **Exploratory Phase**: Outline diverse hypotheses and potential research directions.
+2. **Deep Dive Phase**: Present detailed analysis and in‑depth findings.
+3. **Synthesis Phase**: Consolidate insights into a coherent final report.
+
+Structure the final report in Markdown with the following sections:
 1. **Executive Summary**: A succinct overview of the research findings.
 2. **User Intent and Inputs**: A clear restatement and analysis of the user's original query and feedback.
-3. **Directly Requested Findings**: A detailed account addressing the key requirements extracted from the user input.
+3. **Directly Requested Findings**: Specific details and answers as directly requested by the user.
 4. **Introduction**: Context, background, and the significance of the research topic.
 5. **Methodology**: A detailed description of the research approach and analytical methods.
 6. **Key Insights**: In‑depth and critical findings derived from the research.
