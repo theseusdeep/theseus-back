@@ -16,6 +16,7 @@ export class GoogleService {
 
   /**
    * Use the external API to retrieve Google search results for the given query.
+   * If no results are obtained with the initial timeframe, retry with the next higher timeframe until meaningful results are returned.
    * @param query The search query
    * @param maxResults Maximum number of results to retrieve
    * @param sites Optional array of website URLs to restrict the search.
@@ -28,54 +29,75 @@ export class GoogleService {
       return [];
     }
 
-    let searchUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(
-      query,
-    )}&max_results=${maxResults}`;
-    
-    // Determine timeframe based on query keywords
-    let timeframe = "week"; // default timeframe is "week"
+    // Define allowed timeframes in ascending order of recency
+    const allowedTimeframes = ["24h", "week", "month", "year"];
+
+    // Determine initial timeframe based on query keywords
+    let initialTimeframe = "week"; // default timeframe
     const lowerQuery = query.toLowerCase();
     if (lowerQuery.includes("recent") || lowerQuery.includes("latest") || lowerQuery.includes("today")) {
-      timeframe = "24h";
+      initialTimeframe = "24h";
     } else if (lowerQuery.includes("year")) {
-      timeframe = "year";
+      initialTimeframe = "year";
     } else if (lowerQuery.includes("month")) {
-      timeframe = "month";
+      initialTimeframe = "month";
     }
-    searchUrl += `&timeframe=${timeframe}`;
+    
+    // Determine starting index based on initialTimeframe
+    let startIndex = allowedTimeframes.indexOf(initialTimeframe);
+    if (startIndex === -1) {
+      startIndex = 1; // default to "week"
+    }
 
-    if (sites && sites.length > 0) {
-      for (const site of sites) {
-        searchUrl += `&sites=${encodeURIComponent(site)}`;
+    // Attempt search with increasing timeframes until meaningful results are found.
+    for (let i = startIndex; i < allowedTimeframes.length; i++) {
+      const currentTimeframe = allowedTimeframes[i];
+      let searchUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(
+        query,
+      )}&max_results=${maxResults}&timeframe=${currentTimeframe}`;
+      
+      if (sites && sites.length > 0) {
+        for (const site of sites) {
+          searchUrl += `&sites=${encodeURIComponent(site)}`;
+        }
       }
-    }
-
-    try {
-      const response = await fetch(searchUrl, {
-        headers: {
-          'x-api-key': EXTERNAL_API_KEY,
-        },
-      });
-
-      if (!response.ok) {
-        logger.error('External search API returned a non-OK response', {
-          status: response.status,
-          statusText: response.statusText,
+      
+      try {
+        const response = await fetch(searchUrl, {
+          headers: {
+            'x-api-key': EXTERNAL_API_KEY,
+          },
         });
-        return [];
+  
+        if (!response.ok) {
+          logger.error('External search API returned a non-OK response', {
+            status: response.status,
+            statusText: response.statusText,
+          });
+          continue;
+        }
+  
+        const json = await response.json();
+        const results: string[] = Array.isArray(json.results) ? json.results : [];
+  
+        logger.info('External search API succeeded', { timeframe: currentTimeframe, resultsCount: results.length });
+  
+        // If meaningful results are found, return them
+        if (results.length > 0) {
+          return results.slice(0, maxResults);
+        } else {
+          logger.warn(`No results found for timeframe "${currentTimeframe}". Retrying with next higher timeframe...`);
+        }
+      } catch (e: any) {
+        logger.error('Error calling external search API', {
+          error: e.toString(),
+          stack: e.stack,
+        });
+        // If an error occurs, proceed to the next timeframe.
       }
-
-      const json = await response.json();
-      const results: string[] = Array.isArray(json.results) ? json.results : [];
-      logger.info('External search API succeeded', { resultsCount: results.length });
-      return results.slice(0, maxResults);
-    } catch (e: any) {
-      logger.error('Error calling external search API', {
-        error: e.toString(),
-        stack: e.stack,
-      });
-      return [];
     }
+    // If all timeframes yield no results, return an empty array.
+    return [];
   }
 
   /**
