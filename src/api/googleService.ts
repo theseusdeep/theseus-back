@@ -16,88 +16,85 @@ export class GoogleService {
 
   /**
    * Use the external API to retrieve Google search results for the given query.
-   * If no results are obtained with the initial timeframe, retry with the next higher timeframe until meaningful results are returned.
    * @param query The search query
    * @param maxResults Maximum number of results to retrieve
    * @param sites Optional array of website URLs to restrict the search.
+   * @param timeframe Optional relative time filter for search results (e.g., "24h", "week", "month", "year").
    * @returns An array of result URLs
    */
-  public async googleSearch(query: string, maxResults: number, sites?: string[]): Promise<string[]> {
-    logger.debug('GoogleService: googleSearch called', { query, maxResults, sites });
+  public async googleSearch(query: string, maxResults: number, sites?: string[], timeframe?: string): Promise<string[]> {
+    logger.debug('GoogleService: googleSearch called', { query, maxResults, sites, timeframe });
     if (!EXTERNAL_API_KEY) {
       logger.error('Missing SEARCH_API_KEY environment variable');
       return [];
     }
 
-    // Define allowed timeframes in ascending order of recency
-    const allowedTimeframes = ["24h", "week", "month", "year"];
+    let searchUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(
+      query,
+    )}&max_results=${maxResults}`;
 
-    // Determine initial timeframe based on query keywords
-    let initialTimeframe = "week"; // default timeframe
-    const lowerQuery = query.toLowerCase();
-    if (lowerQuery.includes("recent") || lowerQuery.includes("latest") || lowerQuery.includes("today")) {
-      initialTimeframe = "24h";
-    } else if (lowerQuery.includes("year")) {
-      initialTimeframe = "year";
-    } else if (lowerQuery.includes("month")) {
-      initialTimeframe = "month";
-    }
-    
-    // Determine starting index based on initialTimeframe
-    let startIndex = allowedTimeframes.indexOf(initialTimeframe);
-    if (startIndex === -1) {
-      startIndex = 1; // default to "week"
-    }
-
-    // Attempt search with increasing timeframes until meaningful results are found.
-    for (let i = startIndex; i < allowedTimeframes.length; i++) {
-      const currentTimeframe = allowedTimeframes[i];
-      let searchUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(
-        query,
-      )}&max_results=${maxResults}&timeframe=${currentTimeframe}`;
-      
-      if (sites && sites.length > 0) {
-        for (const site of sites) {
-          searchUrl += `&sites=${encodeURIComponent(site)}`;
-        }
+    if (sites && sites.length > 0) {
+      for (const site of sites) {
+        searchUrl += `&sites=${encodeURIComponent(site)}`;
       }
-      
-      try {
-        const response = await fetch(searchUrl, {
+    }
+
+    // Validate and add timeframe if provided and allowed
+    const allowedTimeframes = new Set(["24h", "week", "month", "year"]);
+    if (timeframe && allowedTimeframes.has(timeframe)) {
+      searchUrl += `&timeframe=${encodeURIComponent(timeframe)}`;
+    }
+
+    try {
+      const response = await fetch(searchUrl, {
+        headers: {
+          'x-api-key': EXTERNAL_API_KEY,
+        },
+      });
+
+      if (!response.ok) {
+        logger.error('External search API returned a non-OK response', {
+          status: response.status,
+          statusText: response.statusText,
+        });
+        return [];
+      }
+
+      const json = await response.json();
+      let results: string[] = Array.isArray(json.results) ? json.results : [];
+      logger.info('External search API succeeded', { resultsCount: results.length });
+
+      // If timeframe was used and insufficient results obtained, try fallback without timeframe
+      if (timeframe && results.length < 3) {
+        logger.warn('Insufficient results with timeframe filter, retrying without timeframe.');
+        let fallbackUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}`;
+        if (sites && sites.length > 0) {
+          for (const site of sites) {
+            fallbackUrl += `&sites=${encodeURIComponent(site)}`;
+          }
+        }
+        const fallbackResponse = await fetch(fallbackUrl, {
           headers: {
             'x-api-key': EXTERNAL_API_KEY,
           },
         });
-  
-        if (!response.ok) {
-          logger.error('External search API returned a non-OK response', {
-            status: response.status,
-            statusText: response.statusText,
-          });
-          continue;
+        if (fallbackResponse.ok) {
+          const fallbackJson = await fallbackResponse.json();
+          const fallbackResults: string[] = Array.isArray(fallbackJson.results) ? fallbackJson.results : [];
+          // Merge results uniquely
+          results = Array.from(new Set([...results, ...fallbackResults]));
+          logger.info('Fallback search succeeded', { fallbackResultsCount: fallbackResults.length, totalResults: results.length });
         }
-  
-        const json = await response.json();
-        const results: string[] = Array.isArray(json.results) ? json.results : [];
-  
-        logger.info('External search API succeeded', { timeframe: currentTimeframe, resultsCount: results.length });
-  
-        // If meaningful results are found, return them
-        if (results.length > 0) {
-          return results.slice(0, maxResults);
-        } else {
-          logger.warn(`No results found for timeframe "${currentTimeframe}". Retrying with next higher timeframe...`);
-        }
-      } catch (e: any) {
-        logger.error('Error calling external search API', {
-          error: e.toString(),
-          stack: e.stack,
-        });
-        // If an error occurs, proceed to the next timeframe.
       }
+
+      return results.slice(0, maxResults);
+    } catch (e: any) {
+      logger.error('Error calling external search API', {
+        error: e.toString(),
+        stack: e.stack,
+      });
+      return [];
     }
-    // If all timeframes yield no results, return an empty array.
-    return [];
   }
 
   /**
@@ -201,3 +198,5 @@ export class GoogleService {
     }
   }
 }
+
+export const googleService = new GoogleService();
