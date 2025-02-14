@@ -296,10 +296,24 @@ async function processSerpResult({
 }) {
   let rawContents = await googleService.scrape(result);
 
-  // Only mark a URL as relevant if its content is non-null and sufficiently substantive.
+  // Summarize each content piece if lengthy
+  const summarizedContents = await Promise.all(
+    rawContents.map(async (content) => {
+      if (content && content.length > 1000) {
+        try {
+          return await summarizeContent(content, selectedModel);
+        } catch (e) {
+          logger.warn('Summarization failed, using raw content', { error: e });
+          return content;
+        }
+      }
+      return content || '';
+    })
+  );
+
   const validIndexes: number[] = [];
-  rawContents.forEach((content, index) => {
-    if (content !== null && content.trim().length > 30) {
+  summarizedContents.forEach((content, index) => {
+    if (content.trim() !== '') {
       validIndexes.push(index);
     }
   });
@@ -309,7 +323,7 @@ async function processSerpResult({
   logger.info(`Ran "${query}", retrieved summarized content for ${validUrls.length} URLs`);
 
   try {
-    let trimmedContents = rawContents.map(content => content ?? '').join('\n\n');
+    let trimmedContents = summarizedContents.join('\n\n');
     let promptText = `Conduct a rigorous and scholarly analysis of the following search results for "${query}". Generate ${numLearnings} key insights and ${numFollowUpQuestions} thought‑provoking follow‑up questions that are deeply grounded in current research trends and critical evaluation. Additionally, ensure that all insights and questions directly reflect the user's original research intent and any prior feedback.${includeTopUrls ? ' Also, identify candidate top recommendations with clear, evidence‑based justification.' : ''}
 
 Search Results:
@@ -337,7 +351,7 @@ Required JSON format:
     for (const trimSize of trimSizes) {
       if (tokenCount <= getMaxContextTokens(selectedModel)) break;
       logger.warn(`Prompt too long (${tokenCount} tokens), trimming to ${trimSize} per content...`);
-      const reTrimmed = rawContents.map(content => trimPrompt(content ?? '', trimSize)).join('\n\n');
+      const reTrimmed = summarizedContents.map(content => trimPrompt(content, trimSize)).join('\n\n');
       promptText = `Conduct a rigorous and scholarly analysis of the following search results for "${query}". Generate ${numLearnings} key insights and ${numFollowUpQuestions} thought‑provoking follow‑up questions that are deeply grounded in current research trends and critical evaluation.${includeTopUrls ? ' Also, identify candidate top recommendations with clear, evidence‑based justification.' : ''}
 
 Search Results:
@@ -434,7 +448,7 @@ User Input (Original Query and Feedback):
 Research Learnings:
 ${learnings.map((learning, i) => `${i + 1}. ${learning}`).join('\n')}
 
-In your report, include a dedicated section titled "User Intent and Inputs" that summarizes the user's original query and feedback, and a section titled "Directly Requested Findings" that specifically addresses any detailed requirements mentioned by the user.
+In your report, include a dedicated section titled "User Intent and Inputs" that summarizes the user's original query and feedback responses, and a section titled "Directly Requested Findings" that specifically addresses any detailed requirements mentioned by the user.
 
 Additionally, organize the report into the following hierarchical phases:
 1. **Exploratory Phase**: Outline diverse hypotheses and potential research directions.
@@ -483,10 +497,9 @@ Return the final report as a valid JSON object in the following format:
     const safeResult = res.object as { reportMarkdown: string };
     let reportWithNewlines = safeResult.reportMarkdown.replace(/\\n/g, '\n');
     const topSection = topUrls && topUrls.length > 0
-      ? `\n\n## Top Recommendations\n\n${topUrls.map(item => `- [${item.url}](${item.url}): ${item.description}`).join('\n')}`
+      ? `\n\n## Top Recommendations\n\n${topUrls.map(item => `- <span class="break-words">${item.url}</span>: ${item.description}`).join('\n')}`
       : '';
-    // Updated Citations section: now renders clickable markdown hyperlinks.
-    const urlsSection = `\n\n## Citations\n\n${visitedUrls.map(url => `- [${url}](${url})`).join('\n')}`;
+    const urlsSection = `\n\n## Citations\n\n${visitedUrls.map(url => `- <span class="break-words">${url}</span>`).join('\n')}`;
 
     // Self-review phase: assess the report for coherence and completeness.
     let selfReviewSection = '';
@@ -520,7 +533,7 @@ ${prompt}
 ${learnings.map((learning, i) => `${i + 1}. ${learning}`).join('\n')}
 
 ## Citations
-${visitedUrls.map(url => `- [${url}](${url})`).join('\n')}`;
+${visitedUrls.map(url => `- ${url}`).join('\n')}`;
     return fallbackReport;
   }
 }
