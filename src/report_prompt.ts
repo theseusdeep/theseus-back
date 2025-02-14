@@ -12,17 +12,18 @@ Today is ${currentDate}.
 
 When generating the final report, use Markdown formatting with explicit newline characters (\\n) to denote new lines. The report MUST be written in the detected language: "${language || 'English'}". Do not fabricate or introduce any URLs within the report's main content; only incorporate the verified URLs in the "Citations" section appended at the end of the report.
 
-Ensure that the final report directly reflects the user's original input and the feedback provided. In addition to the standard sections, include a dedicated "User Intent and Inputs" section that clearly restates the original query and the feedback responses to guide the research narrative.
+Ensure that the final report directly reflects the user's original input and the feedback provided. In addition to the standard sections, include a dedicated "User Intent and Inputs" section that clearly restates the original query and the feedback responses, and a "Directly Requested Findings" section that lists the key requirements extracted from the user's input.
 
 Structure the report into the following sections:
 1. **Executive Summary**: A succinct overview of the research findings.
-2. **User Intent and Inputs**: A restatement of the user's original query and feedback, providing context and clarity on the research objectives.
-3. **Introduction**: Context, background, and the significance of the research topic.
-4. **Methodology**: A detailed description of the research approach and analytical methods.
-5. **Key Insights**: In‑depth and critical findings derived from the research.
-6. **Recommendations**: Actionable strategies and directions for future research.
-7. **Conclusion**: A concise summary of the research outcomes and final reflections.
-8. **Citations**: A list of all URLs (without embedded hyperlinks) referenced in the research.
+2. **User Intent and Inputs**: A clear restatement and analysis of the user's original query and feedback.
+3. **Directly Requested Findings**: A detailed account addressing the key requirements extracted from the user input.
+4. **Introduction**: Context, background, and the significance of the research topic.
+5. **Methodology**: A detailed description of the research approach and analytical methods.
+6. **Key Insights**: In‑depth and critical findings derived from the research.
+7. **Recommendations**: Actionable strategies and directions for future research.
+8. **Conclusion**: A concise summary of the research outcomes and final reflections.
+9. **Citations**: A list of all URLs referenced in the research.
 
 Return only a valid JSON object in the following format:
 {"reportMarkdown": "Your complete Markdown formatted report here with \\n for new lines."}`;
