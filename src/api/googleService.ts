@@ -31,6 +31,18 @@ export class GoogleService {
     let searchUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(
       query,
     )}&max_results=${maxResults}`;
+    
+    // Determine timeframe based on query keywords
+    let timeframe = "week"; // default timeframe is "week"
+    const lowerQuery = query.toLowerCase();
+    if (lowerQuery.includes("recent") || lowerQuery.includes("latest") || lowerQuery.includes("today")) {
+      timeframe = "24h";
+    } else if (lowerQuery.includes("year")) {
+      timeframe = "year";
+    } else if (lowerQuery.includes("month")) {
+      timeframe = "month";
+    }
+    searchUrl += `&timeframe=${timeframe}`;
 
     if (sites && sites.length > 0) {
       for (const site of sites) {
@@ -167,5 +179,3 @@ export class GoogleService {
     }
   }
 }
-
-export const googleService = new GoogleService();
