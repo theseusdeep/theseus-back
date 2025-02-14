@@ -127,7 +127,9 @@ export const o3MiniModel = VeniceAI('o3-mini', {
   reasoningEffort: 'medium',
   structuredOutputs: true,
 });
-export const summarizationModel = VeniceAI(process.env.VENICE_SUMMARIZATION_MODEL || 'venice-summarization-default', {
+
+// New Summarization Model for dynamic content summarization
+export const summarizationModel = VeniceAI(process.env.VENICE_SUMMARIZATION_MODEL || 'summarization-default-model', {
   structuredOutputs: true,
 });
 
