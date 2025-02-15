@@ -359,7 +359,7 @@ export async function generateSummary(content: string, selectedModel?: string): 
     return '';
   }
   try {
-    const promptText = `Summarize the following content into a concise executive summary in bullet points:\n\n${content}\n\nExecutive Summary:`;
+    const promptText = `Return your answer as a valid JSON object with a single key "summary". Do not include any extra text. Required JSON format: {"summary": "Your executive summary in bullet points."}`;
     const res = await generateObjectSanitized({
       model: selectedModel ? createModel(selectedModel) : summarizationModel,
       system: systemPrompt(),
