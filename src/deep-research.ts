@@ -479,39 +479,12 @@ ${visitedUrls.map(url => `- [${url}](${url})`).join('\n')}`;
 }
 
 /**
- * Finalizes candidate top recommendations by performing a final LLM query to select the best ones.
- * @param candidates Array of candidate recommendations.
- * @param count Number of final recommendations desired (default 5 if not specified by the user).
- * @param selectedModel Optional model identifier.
- * @returns An array of final top recommendation objects.
- */
-async function finalizeTopRecommendations(
-  candidates: Array<{ url: string; description: string }>,
-  count: number,
-  selectedModel?: string,
-): Promise<Array<{ url: string; description: string }>> {
-  const promptText = `You are a research assistant tasked with selecting the final best recommendations from the following candidate recommendations. Consider quality, relevance, and reliability. Please select the final best ${count} recommendations.
-
-Candidate Recommendations:
-${JSON.stringify(candidates, null, 2)}
-
-Return the result as a JSON object with a key "finalTopUrls" that is an array of objects, each having "url" and "description".`;
-  const res = await generateObjectSanitized({
-    model: selectedModel ? createModel(selectedModel) : deepSeekModel,
-    system: systemPrompt(),
-    prompt: promptText,
-    schema: z.object({
-      finalTopUrls: z.array(z.object({ url: z.string(), description: z.string() })),
-    }),
-    temperature: 0.7,
-    maxTokens: 1000,
-  });
-  return res.object.finalTopUrls;
-}
-
-/**
  * Modified deepResearch function with an optional progressCallback to send progress updates.
  * Also supports continuation research via previous context (learned so far).
+ *
+ * Enhancements applied:
+ * - Uses a structured ResearchProgress object to track detailed progress (depth, breadth, total & completed queries, current query).
+ * - Updates progress via a reportProgress helper that merges partial updates and calls the progressCallback.
  */
 export async function deepResearch({
   query,
@@ -531,15 +504,27 @@ export async function deepResearch({
   visitedUrls?: string[];
   selectedModel?: string;
   concurrency?: number;
-  progressCallback?: (msg: string) => void;
+  progressCallback?: (progress: ResearchProgress) => void;
   sites?: string[];
 }): Promise<ResearchResult> {
   logger.info('deepResearch started', { query, breadth, depth, selectedModel, sites });
-  progressCallback && progressCallback(`PROGRESS: Depth: ${depth}, Breadth: ${breadth}`);
-
-  const maxAllowedConcurrency = selectedModel ? getMaxConcurrency(selectedModel) : 1;
-  const effectiveConcurrency = Math.min(concurrency, maxAllowedConcurrency);
-  const requestLimit = pLimit(effectiveConcurrency);
+  
+  // Initialize structured progress object.
+  const progress: ResearchProgress = {
+    currentDepth: depth,
+    totalDepth: depth,
+    currentBreadth: breadth,
+    totalBreadth: breadth,
+    totalQueries: 0,
+    completedQueries: 0,
+    currentQuery: '',
+  };
+  
+  // Helper function to merge updates and report progress.
+  const reportProgress = (update: Partial<ResearchProgress>) => {
+    Object.assign(progress, update);
+    progressCallback && progressCallback({ ...progress });
+  };
 
   const serpQueries = await generateSerpQueries({
     query,
@@ -547,17 +532,22 @@ export async function deepResearch({
     numQueries: breadth,
     selectedModel,
   });
+  
+  reportProgress({
+    totalQueries: serpQueries.length,
+    currentQuery: serpQueries[0]?.query,
+  });
+  
+  const limit = pLimit(Math.min(concurrency, selectedModel ? getMaxConcurrency(selectedModel) : 1));
 
   const results = await Promise.all(
     serpQueries.map(serpQuery =>
-      requestLimit(async () => {
+      limit(async () => {
         try {
-          progressCallback && progressCallback(`Searching for "${serpQuery.query}"...`);
-          // Now pass the timeframe param to prioritize recent results intelligently.
+          reportProgress({ currentQuery: serpQuery.query });
           const urls = await googleService.googleSearch(serpQuery.query, 10, sites);
-          progressCallback && progressCallback(`Found ${urls.length} results for "${serpQuery.query}". Processing...`);
+          reportProgress({ currentQuery: `Found ${urls.length} results for "${serpQuery.query}"` });
           logger.info('Processing SERP result', { query: serpQuery.query, urlsCount: urls.length });
-          // Determine whether to include top URLs based on the query content
           const lowerSerpQuery = serpQuery.query.toLowerCase();
           const includeTopUrls = lowerSerpQuery.includes('best') && (lowerSerpQuery.includes('price') || lowerSerpQuery.includes('quality'));
           const newLearnings = await processSerpResult({
@@ -567,24 +557,26 @@ export async function deepResearch({
             selectedModel,
             includeTopUrls,
           });
-          progressCallback && progressCallback(`Processed "${serpQuery.query}" and generated ${newLearnings.learnings.length} insights.`);
+          reportProgress({ completedQueries: progress.completedQueries + 1, currentQuery: serpQuery.query });
           const allLearnings = [...learnings, ...newLearnings.learnings];
-          const allUrls: string[] = [...visitedUrls, ...newLearnings.visitedUrls].filter(
-            (u): u is string => u !== undefined,
-          );
-          // Collect topUrls from each SERP result
+          const allUrls: string[] = [...visitedUrls, ...newLearnings.visitedUrls].filter((u): u is string => u !== undefined);
           const currentTopUrls = newLearnings.topUrls || [];
           const newDepth = depth - 1;
+          const newBreadth = Math.ceil(breadth / 2);
           if (newDepth > 0) {
-            logger.info('Researching deeper', { nextBreadth: Math.ceil(breadth / 2), nextDepth: newDepth });
-            progressCallback && progressCallback(`PROGRESS: Depth: ${newDepth}, Breadth: ${Math.ceil(breadth / 2)}`);
+            logger.info('Researching deeper', { nextBreadth: newBreadth, nextDepth: newDepth });
+            reportProgress({
+              currentDepth: newDepth,
+              currentBreadth: newBreadth,
+              currentQuery: serpQuery.query,
+            });
             const nextQuery = `
             Previous research goal: ${serpQuery.researchGoal}
             Follow-up research directions: ${newLearnings.followUpQuestions.map(q => `\n${q}`).join('')}
           `.trim();
-            const deeperResult = await deepResearch({
+            return deepResearch({
               query: nextQuery,
-              breadth: Math.ceil(breadth / 2),
+              breadth: newBreadth,
               depth: newDepth,
               learnings: allLearnings,
               visitedUrls: allUrls,
@@ -593,19 +585,18 @@ export async function deepResearch({
               progressCallback,
               sites,
             });
-            return {
-              learnings: deeperResult.learnings,
-              visitedUrls: deeperResult.visitedUrls,
-              topUrls: [...currentTopUrls, ...deeperResult.topUrls],
-            };
           } else {
+            reportProgress({
+              currentDepth: 0,
+              completedQueries: progress.completedQueries + 1,
+              currentQuery: serpQuery.query,
+            });
             return {
               learnings: allLearnings,
               visitedUrls: allUrls,
-              topUrls: currentTopUrls,
             };
           }
-        } catch (e) {
+        } catch (e: any) {
           logger.error(`Error running query: ${serpQuery.query}`, { error: e });
           return {
             learnings: [],
@@ -618,15 +609,12 @@ export async function deepResearch({
   );
 
   const allLearnings = [...new Set(results.flatMap(r => r.learnings))];
-  const allVisitedUrls = [
-    ...new Set(results.flatMap(r => r.visitedUrls.filter((u): u is string => u !== undefined))),
-  ];
+  const allVisitedUrls = [...new Set(results.flatMap(r => r.visitedUrls))];
   const allTopUrls = results.flatMap(r => r.topUrls);
   const uniqueTopUrls = Array.from(new Map(allTopUrls.map(item => [item.url, item])).values());
 
   let finalTopUrls = uniqueTopUrls;
   if (finalTopUrls.length > 0) {
-    // Check if the query specifies a number for top recommendations using a regex e.g., "top 3" or "top 7"
     const match = query.match(/top\s+(\d+)/i);
     const recommendedCount = match && match[1] ? parseInt(match[1]) : 5;
     finalTopUrls = await finalizeTopRecommendations(uniqueTopUrls, recommendedCount, selectedModel);
