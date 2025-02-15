@@ -57,50 +57,76 @@ export class GoogleService {
       const results: string[] = Array.isArray(json.results) ? json.results : [];
       logger.info('External search API succeeded', { resultsCount: results.length });
 
-      // If very few results, try a fallback with a less restrictive timeframe ("month").
+      // If very few results, try a fallback with "month" timeframe.
       if (results.length < 3) {
-        logger.info('Few results obtained, retrying with less restrictive timeframe', { currentTimeframe: timeframe });
-        const fallbackTimeframe = "month";
-        let fallbackUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}&timeframe=${fallbackTimeframe}`;
+        logger.info('Few results obtained from primary search, trying fallback with "month" timeframe', { currentTimeframe: timeframe });
+        const fallbackMonthTimeframe = "month";
+        let fallbackMonthUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}&timeframe=${fallbackMonthTimeframe}`;
         if (sites && sites.length > 0) {
           for (const site of sites) {
-            fallbackUrl += `&sites=${encodeURIComponent(site)}`;
+            fallbackMonthUrl += `&sites=${encodeURIComponent(site)}`;
           }
         }
-        const fallbackResponse = await fetch(fallbackUrl, {
+        const fallbackMonthResponse = await fetch(fallbackMonthUrl, {
           headers: {
             'x-api-key': EXTERNAL_API_KEY,
           },
         });
-        if (fallbackResponse.ok) {
-          const fallbackJson = await fallbackResponse.json();
-          const fallbackResults: string[] = Array.isArray(fallbackJson.results) ? fallbackJson.results : [];
-          // If still very few results, do an extra fallback with no timeframe parameter.
-          if (fallbackResults.length < 3) {
-            logger.info('Fallback with "month" timeframe returned few results, retrying with no timeframe parameter');
-            let extraFallbackUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}`;
+        if (fallbackMonthResponse.ok) {
+          const fallbackMonthJson = await fallbackMonthResponse.json();
+          const fallbackMonthResults: string[] = Array.isArray(fallbackMonthJson.results) ? fallbackMonthJson.results : [];
+
+          // If "month" fallback returns too few results, try with "year"
+          if (fallbackMonthResults.length < 3) {
+            logger.info('Fallback with "month" timeframe returned few results, trying fallback with "year" timeframe');
+            const fallbackYearTimeframe = "year";
+            let fallbackYearUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}&timeframe=${fallbackYearTimeframe}`;
             if (sites && sites.length > 0) {
               for (const site of sites) {
-                extraFallbackUrl += `&sites=${encodeURIComponent(site)}`;
+                fallbackYearUrl += `&sites=${encodeURIComponent(site)}`;
               }
             }
-            const extraFallbackResponse = await fetch(extraFallbackUrl, {
+            const fallbackYearResponse = await fetch(fallbackYearUrl, {
               headers: {
                 'x-api-key': EXTERNAL_API_KEY,
               },
             });
-            if (extraFallbackResponse.ok) {
-              const extraFallbackJson = await extraFallbackResponse.json();
-              const extraFallbackResults: string[] = Array.isArray(extraFallbackJson.results) ? extraFallbackJson.results : [];
-              const mergedResults = Array.from(new Set([...results, ...fallbackResults, ...extraFallbackResults]));
-              logger.info('Merged extra fallback results', { mergedCount: mergedResults.length });
-              return mergedResults.slice(0, maxResults);
+            if (fallbackYearResponse.ok) {
+              const fallbackYearJson = await fallbackYearResponse.json();
+              const fallbackYearResults: string[] = Array.isArray(fallbackYearJson.results) ? fallbackYearJson.results : [];
+
+              // If "year" fallback still returns too few results, try with no timeframe.
+              if (fallbackYearResults.length < 3) {
+                logger.info('Fallback with "year" timeframe returned few results, trying extra fallback with no timeframe');
+                let extraFallbackUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}`;
+                if (sites && sites.length > 0) {
+                  for (const site of sites) {
+                    extraFallbackUrl += `&sites=${encodeURIComponent(site)}`;
+                  }
+                }
+                const extraFallbackResponse = await fetch(extraFallbackUrl, {
+                  headers: {
+                    'x-api-key': EXTERNAL_API_KEY,
+                  },
+                });
+                if (extraFallbackResponse.ok) {
+                  const extraFallbackJson = await extraFallbackResponse.json();
+                  const extraFallbackResults: string[] = Array.isArray(extraFallbackJson.results) ? extraFallbackJson.results : [];
+                  const mergedResults = Array.from(new Set([...results, ...fallbackMonthResults, ...fallbackYearResults, ...extraFallbackResults]));
+                  logger.info('Merged extra fallback results', { mergedCount: mergedResults.length });
+                  return mergedResults.slice(0, maxResults);
+                }
+              } else {
+                const mergedResults = Array.from(new Set([...results, ...fallbackMonthResults, ...fallbackYearResults]));
+                logger.info('Merged fallback results from primary, month and year', { mergedCount: mergedResults.length });
+                return mergedResults.slice(0, maxResults);
+              }
             }
+          } else {
+            const mergedResults = Array.from(new Set([...results, ...fallbackMonthResults]));
+            logger.info('Merged fallback results from primary and month', { mergedCount: mergedResults.length });
+            return mergedResults.slice(0, maxResults);
           }
-          // Merge and deduplicate results from primary and "month" fallback.
-          const mergedResults = Array.from(new Set([...results, ...fallbackResults]));
-          logger.info('Merged fallback results', { mergedCount: mergedResults.length });
-          return mergedResults.slice(0, maxResults);
         }
       }
 
@@ -201,7 +227,6 @@ export class GoogleService {
       }
       return json.scraped.map((item: any) => {
         if (item && item.status === 200 && !item.error) {
-          // Use only the Summary property for scraped content
           return item.Summary || '';
         }
         return null;
