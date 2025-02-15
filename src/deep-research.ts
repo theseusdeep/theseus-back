@@ -13,6 +13,16 @@ import { reportPrompt } from './report_prompt';
 import { googleService } from './api/googleService';
 import { logger } from './api/utils/logger';
 
+const CONTEXT_LIMIT = process.env.CONTEXT_SIZE ? parseInt(process.env.CONTEXT_SIZE) : 120_000;
+
+/**
+ * New summarization model for dynamic content summarization.
+ * Uses the VENICE_SUMMARIZATION_MODEL environment variable.
+ */
+const summarizationModel = process.env.VENICE_SUMMARIZATION_MODEL
+  ? createModel(process.env.VENICE_SUMMARIZATION_MODEL)
+  : deepSeekModel;
+
 function getMaxContextTokens(model?: string) {
   return model === DEFAULT_MODEL ? 131072 : 8000;
 }
@@ -103,18 +113,94 @@ export async function generateObjectSanitized<T>(params: any): Promise<{ object:
   }
 }
 
-interface SerpQuery {
+/**
+ * NEW FUNCTION: Generate an exploratory outline for the research topic.
+ * This serves as the Exploratory Phase in our hierarchical reasoning.
+ */
+async function generateExploratoryOutline({
+  query,
+  selectedModel,
+}: {
   query: string;
-  researchGoal: string;
+  selectedModel?: string;
+}): Promise<string> {
+  try {
+    const promptText = `Generate a comprehensive outline for researching the following topic. Include a list of potential research directions and key questions. Provide the result as a JSON object with a key "outline" containing the outline in bullet points.
+
+Topic: "${query}"`;
+    const res = await generateObjectSanitized({
+      model: selectedModel ? createModel(selectedModel) : deepSeekModel,
+      system: systemPrompt(),
+      prompt: promptText,
+      schema: z.object({
+        outline: z.string().describe('A bullet point outline for further research'),
+      }),
+      temperature: 0.6,
+      maxTokens: 800,
+    });
+    return res.object.outline;
+  } catch (error) {
+    logger.error('Error generating exploratory outline', { error });
+    return 'No outline available.';
+  }
 }
 
-interface SerpResponse {
-  queries: SerpQuery[];
+/**
+ * NEW FUNCTION: Summarize the given report into an executive summary in bullet points.
+ */
+async function summarizeReport(report: string): Promise<string> {
+  try {
+    const promptText = `Summarize the following report into concise bullet points highlighting the key findings and insights. Provide the result as a JSON object with a key "summary".
+
+Report:
+${report}`;
+    const res = await generateObjectSanitized({
+      model: summarizationModel,
+      system: systemPrompt(),
+      prompt: promptText,
+      schema: z.object({
+        summary: z.string().describe('Executive summary in bullet points'),
+      }),
+      temperature: 0.5,
+      maxTokens: 600,
+    });
+    return res.object.summary;
+  } catch (error) {
+    logger.error('Error summarizing report', { error });
+    return 'Summary not available.';
+  }
+}
+
+/**
+ * NEW FUNCTION: Self-review the report for coherence and completeness.
+ * The LLM assesses the report and returns a final polished version.
+ */
+async function selfReviewReport(report: string): Promise<string> {
+  try {
+    const promptText = `Review the following research report for coherence, completeness, and clarity. Suggest any improvements and then provide a final polished version. Return the result as a JSON object with a key "finalReport".
+
+Report:
+${report}`;
+    const res = await generateObjectSanitized({
+      model: deepSeekModel,
+      system: systemPrompt(),
+      prompt: promptText,
+      schema: z.object({
+        finalReport: z.string().describe('The final, reviewed and polished research report'),
+      }),
+      temperature: 0.5,
+      maxTokens: 1000,
+    });
+    return res.object.finalReport;
+  } catch (error) {
+    logger.error('Error in self-review of report', { error });
+    return report; // Fallback to the original report
+  }
 }
 
 /**
  * Generates SERP queries based on the research topic and optional previous insights.
- * This prompt now explicitly sets the Exploratory Phase—asking for a diverse set of hypotheses.
+ * UPDATED: Each query should be of moderate length (roughly 7 to 12 words) to optimize search results.
  */
 async function generateSerpQueries({
   query,
@@ -128,8 +214,8 @@ async function generateSerpQueries({
   selectedModel?: string;
 }) {
   try {
-    const promptText = `In the Exploratory Phase, generate ${numQueries} professional, rigorously crafted, and innovative search queries that cover diverse hypotheses and potential research directions for the following topic. Each query should be concise (5 to 10 words) yet descriptive, and must be paired with a brief, actionable research goal that leverages modern analytical frameworks and industry best practices.
-
+    const promptText = `Generate ${numQueries} professional, rigorously crafted, and innovative search queries to explore the following research topic. Each query should be of moderate length (approximately 7 to 12 words) yet descriptive, and must be paired with a brief, actionable research goal that leverages modern analytical frameworks and adheres to industry best practices.
+    
 Topic: "${query}"
 ${learnings ? `Previous insights:\n${learnings.join('\n')}` : ''}
 Ensure that the queries are directly aligned with the user's original intent and any provided feedback.
@@ -183,7 +269,7 @@ Required JSON format:
       maxTokens: 1000,
     });
 
-    const serpResponse = res.object as SerpResponse;
+    const serpResponse = res.object as { queries: Array<{ query: string; researchGoal: string }> };
     logger.info(`Created ${serpResponse.queries.length} queries`, { queries: serpResponse.queries });
     return serpResponse.queries.slice(0, numQueries);
   } catch (error) {
@@ -335,8 +421,7 @@ Required JSON format:
 
 /**
  * Generates the final report.
- * This function only supplies the LLM with the user input, research learnings, and verified URLs.
- * The structure of the report is determined solely by the system prompt from src/report_prompt.ts.
+ * This function now integrates dynamic summarization and a self‑review step for quality control.
  */
 export async function writeFinalReport({
   prompt,
@@ -366,8 +451,16 @@ export async function writeFinalReport({
       temperature: 0.6,
       maxTokens: 8192,
     });
-    const safeResult = res.object as { reportMarkdown: string };
-    return safeResult.reportMarkdown.replace(/\\n/g, '\n');
+    let rawReport = (res.object as { reportMarkdown: string }).reportMarkdown.replace(/\\n/g, '\n');
+    
+    // NEW: Generate an executive summary using the summarization model.
+    const summary = await summarizeReport(rawReport);
+    const reportWithSummary = `# Executive Summary\n${summary}\n\n` + rawReport;
+    
+    // NEW: Perform a self-review for quality control.
+    const finalReview = await selfReviewReport(reportWithSummary);
+    
+    return finalReview;
   } catch (error) {
     logger.error('Error generating final report', { error });
     return `# Research Report\n\nUser Input: ${prompt}\n\nKey Learnings:\n${learnings.join('\n')}\n\nVerified URLs:\n${visitedUrls.join('\n')}`;
@@ -403,6 +496,7 @@ Return the result as a JSON object with a key "finalTopUrls" that is an array of
 
 /**
  * Performs deep research with optional progress updates and supports continuation research.
+ * UPDATED: Incorporates an exploratory phase (hierarchical reasoning) by generating an initial outline.
  */
 export async function deepResearch({
   query,
@@ -414,6 +508,7 @@ export async function deepResearch({
   concurrency = 1,
   progressCallback,
   sites,
+  exploratoryDone = false,
 }: {
   query: string;
   breadth: number;
@@ -424,9 +519,18 @@ export async function deepResearch({
   concurrency?: number;
   progressCallback?: (msg: string) => void;
   sites?: string[];
+  exploratoryDone?: boolean;
 }): Promise<ResearchResult> {
   logger.info('deepResearch started', { query, breadth, depth, selectedModel, sites });
   progressCallback && progressCallback(`PROGRESS: Depth: ${depth}, Breadth: ${breadth}`);
+
+  // NEW: If this is the initial call, generate an exploratory outline.
+  if (!exploratoryDone) {
+    const outline = await generateExploratoryOutline({ query, selectedModel });
+    learnings.push(`Outline: ${outline}`);
+    progressCallback && progressCallback('Exploratory outline generated.');
+    exploratoryDone = true;
+  }
 
   const maxAllowedConcurrency = selectedModel ? getMaxConcurrency(selectedModel) : 1;
   const effectiveConcurrency = Math.min(concurrency, maxAllowedConcurrency);
@@ -469,10 +573,9 @@ export async function deepResearch({
             logger.info('Researching deeper', { nextBreadth: Math.ceil(breadth / 2), nextDepth: newDepth });
             progressCallback && progressCallback(`PROGRESS: Depth: ${newDepth}, Breadth: ${Math.ceil(breadth / 2)}`);
             const nextQuery = `
-[Deep Dive Phase] Based on the previous research goal: "${serpQuery.researchGoal}" and the following follow-up research directions:
-${newLearnings.followUpQuestions.map((q) => `- ${q}`).join('\n')}
-Please narrow the focus to the most promising research direction and generate a targeted query for further investigation.
-            `.trim();
+            Previous research goal: ${serpQuery.researchGoal}
+            Follow-up research directions: ${newLearnings.followUpQuestions.map((q) => `\n${q}`).join('')}
+          `.trim();
             const deeperResult = await deepResearch({
               query: nextQuery,
               breadth: Math.ceil(breadth / 2),
@@ -483,6 +586,7 @@ Please narrow the focus to the most promising research direction and generate a 
               concurrency,
               progressCallback,
               sites,
+              exploratoryDone, // pass along the flag
             });
             return {
               learnings: deeperResult.learnings,
@@ -533,26 +637,4 @@ Please narrow the focus to the most promising research direction and generate a 
     topUrlsCount: finalResult.topUrls.length,
   });
   return finalResult;
-}
-
-/**
- * Quality Control Check: Review the generated report for coherence, completeness, and clarity.
- * If improvements are needed, return a revised version; otherwise, return the original report.
- */
-export async function qualityControlReview(report: string, selectedModel?: string, language?: string): Promise<string> {
-  const promptText = `Please review the following research report for coherence, completeness, and clarity. If improvements are necessary, provide a revised version of the report in Markdown format. If the report is already optimal, simply return it unchanged. Do not include any commentary or explanations; return only the revised report.
-
-Report:
-${report}`;
-  const res = await generateObjectSanitized({
-    model: selectedModel ? createModel(selectedModel) : deepSeekModel,
-    system: systemPrompt(),
-    prompt: promptText,
-    schema: z.object({
-      revisedReport: z.string().describe('Revised report after quality control'),
-    }),
-    temperature: 0.6,
-    maxTokens: 8192,
-  });
-  return res.object.revisedReport;
 }
