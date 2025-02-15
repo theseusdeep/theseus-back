@@ -240,26 +240,21 @@ async function processSerpResult({
   selectedModel?: string;
   includeTopUrls?: boolean;
 }) {
-  const rawContents = await googleService.scrape(result);
-
-  const validIndexes: number[] = [];
-  rawContents.forEach((content, index) => {
-    if (content !== null) {
-      validIndexes.push(index);
-    }
-  });
-
-  const validUrls = validIndexes.map((i) => result[i]!);
+  // Call scrape with the search query so that the API can determine if each result is related.
+  const scrapedResults = await googleService.scrape(result, query);
+  // Filter to keep only the URLs that returned a summary and are query related.
+  const validResults = scrapedResults.filter(item => item.summary && item.isQueryRelated);
+  const validContents = validResults.map(item => item.summary);
+  const validUrls = validResults.map(item => item.url);
 
   logger.info(`Ran "${query}", retrieved content for ${validUrls.length} URLs`);
-
   try {
-    let trimmedContents = rawContents.map((content) => content ?? '').join('\n\n');
-    let promptText = `Conduct a rigorous and scholarly analysis of the following search results for "${query}". Generate ${numLearnings} key insights and ${numFollowUpQuestions} thought‑provoking follow‑up questions that are deeply grounded in current research trends and critical evaluation. Additionally, ensure that all insights and questions directly reflect the user's original research intent and any prior feedback.${includeTopUrls ? ' Also, identify candidate top recommendations with clear, evidence‑based justification.' : ''}
-
+    let trimmedContents = validContents.join('\n\n');
+    let promptText = `Conduct a rigorous and scholarly analysis of the following search results for "${query}". Generate ${numLearnings} key insights and ${numFollowUpQuestions} thought‑provoking follow‑up questions that are deeply grounded in current research trends and critical evaluation.${includeTopUrls ? ' Also, identify candidate top recommendations with clear, evidence‑based justification.' : ''}
+    
 Search Results:
 ${trimmedContents}
-
+    
 Required JSON format:
 {
   "learnings": [
@@ -282,12 +277,12 @@ Required JSON format:
     for (const trimSize of trimSizes) {
       if (tokenCount <= getMaxContextTokens(selectedModel)) break;
       logger.warn(`Prompt too long (${tokenCount} tokens), trimming to ${trimSize} per content...`);
-      const reTrimmed = rawContents.map((content) => trimPrompt(content ?? '', trimSize)).join('\n\n');
+      const reTrimmed = validContents.map((content) => trimPrompt(content ?? '', trimSize)).join('\n\n');
       promptText = `Conduct a rigorous and scholarly analysis of the following search results for "${query}". Generate ${numLearnings} key insights and ${numFollowUpQuestions} thought‑provoking follow‑up questions that are deeply grounded in current research trends and critical evaluation.${includeTopUrls ? ' Also, identify candidate top recommendations with clear, evidence‑based justification.' : ''}
-
+    
 Search Results:
 ${reTrimmed}
-
+    
 Required JSON format:
 {
   "learnings": [
@@ -327,9 +322,8 @@ Required JSON format:
     };
     return {
       learnings: safeResult.learnings,
-      followUpQuestions: safeResult.followUpQuestions,
-      topUrls: safeResult.topUrls || [],
       visitedUrls: validUrls,
+      topUrls: safeResult.topUrls || [],
     };
   } catch (error) {
     logger.error('Error processing SERP result', { error });
@@ -379,8 +373,7 @@ export async function generateSummary(content: string, selectedModel?: string): 
 
 /**
  * Generates the final report.
- * This function only supplies the LLM with the user input, research learnings, and then
- * appends a Citations section containing exactly the verified URLs used in the research.
+ * This function only supplies the LLM with the user input, research learnings, and verified URLs.
  * The structure of the report is determined solely by the system prompt from src/report_prompt.ts.
  */
 export async function writeFinalReport({
@@ -408,7 +401,9 @@ ${executiveSummary}
 
 User Input: "${prompt}"
 Research Learnings:
-${learnings.join('\n')}`;
+${learnings.join('\n')}
+\nVerified URLs:
+${visitedUrls.join('\n')}`;
     
     const res = await generateObjectSanitized({
       model: selectedModel ? createModel(selectedModel) : deepSeekModel,
@@ -421,26 +416,10 @@ ${learnings.join('\n')}`;
       maxTokens: 8192,
     });
     const safeResult = res.object as { reportMarkdown: string };
-    let reportMarkdown = safeResult.reportMarkdown.replace(/\\n/g, '\n');
-    // Generate the Citations section using the visitedUrls provided
-    let citationsSection = '\n\n## Citations\n';
-    visitedUrls.forEach(url => {
-      citationsSection += `- [${url}](${url})\n`;
-    });
-    // If the generated reportMarkdown already contains a Citations section, replace it; otherwise, append it.
-    if (reportMarkdown.includes('## Citations')) {
-      reportMarkdown = reportMarkdown.replace(/## Citations[\s\S]*/, citationsSection);
-    } else {
-      reportMarkdown += citationsSection;
-    }
-    return reportMarkdown;
+    return safeResult.reportMarkdown.replace(/\\n/g, '\n');
   } catch (error) {
     logger.error('Error generating final report', { error });
-    let citationsSection = '\n\n## Citations\n';
-    visitedUrls.forEach(url => {
-      citationsSection += `- [${url}](${url})\n`;
-    });
-    return `# Research Report\n\nUser Input: ${prompt}\n\nKey Learnings:\n${learnings.join('\n')}\n\n${citationsSection}`;
+    return `# Research Report\n\nUser Input: ${prompt}\n\nKey Learnings:\n${learnings.join('\n')}\n\nVerified URLs:\n${visitedUrls.join('\n')}`;
   }
 }
 
@@ -618,3 +597,4 @@ export async function deepResearch({
   });
   return finalResult;
 }
+
