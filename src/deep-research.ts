@@ -1,8 +1,13 @@
-
 import { compact } from 'lodash-es';
 import pLimit from 'p-limit';
 import { z } from 'zod';
-import { trimPrompt, encoder, createModel, deepSeekModel, DEFAULT_MODEL } from './ai/providers';
+import {
+  trimPrompt,
+  encoder,
+  createModel,
+  deepSeekModel,
+  DEFAULT_MODEL,
+} from './ai/providers';
 import { systemPrompt } from './prompt';
 import { reportPrompt } from './report_prompt';
 import { googleService } from './api/googleService';
@@ -36,9 +41,8 @@ export interface ResearchResult {
 }
 
 /**
- * Updated sanitation helper.
- * First, remove any <think>...</think> blocks.
- * Then, if a "{" exists in the remainder, return the substring from the first "{" to the last "}" (if present).
+ * Remove any <think>...</think> blocks. If a "{" exists, return the substring
+ * from the first "{" to the last "}".
  */
 export function sanitizeDeepSeekOutput(raw: string): string {
   const withoutThink = raw.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
@@ -46,21 +50,16 @@ export function sanitizeDeepSeekOutput(raw: string): string {
   if (firstBrace === -1) {
     return withoutThink;
   }
-  // Find the last closing brace
   const lastBrace = withoutThink.lastIndexOf('}');
   if (lastBrace === -1 || lastBrace < firstBrace) {
-    // If no closing brace is found, return from the first brace onward
     return withoutThink.slice(firstBrace).trim();
   }
   return withoutThink.slice(firstBrace, lastBrace + 1).trim();
 }
 
 /**
- * A wrapper for model calls that ensures the Venice parameter is always included.
- * It also logs the system and user prompts.
- *
- * For the default model, we expect the API response to follow the chat completion format.
- * We extract the assistant message content, sanitize it, and parse it as JSON.
+ * Calls the model ensuring the Venice parameter is always included.
+ * Logs the prompts and sanitizes the response.
  */
 export async function generateObjectSanitized<T>(params: any): Promise<{ object: T }> {
   let res;
@@ -73,20 +72,16 @@ export async function generateObjectSanitized<T>(params: any): Promise<{ object:
   // Always force include_venice_system_prompt to false.
   params.venice_parameters = { include_venice_system_prompt: false };
 
-  // Call the model (our custom function returned from providers)
   res = await params.model(params);
 
   if (params.model.modelId === DEFAULT_MODEL) {
     logger.info('Received response from Venice API', { response: res });
-    // Expecting the response in Venice format:
-    // { choices: [ { message: { content: "..." }, ... } ], ... }
     const rawText = res.choices && res.choices[0]?.message?.content;
     if (!rawText) {
       throw new Error('No response text received from Venice API');
     }
     logger.debug('Raw text from Venice API', { rawText: rawText.substring(0, 300) });
     const sanitized = sanitizeDeepSeekOutput(rawText);
-    // Log a snippet and length of the sanitized text for debugging
     logger.debug('Sanitized text', {
       snippet: sanitized.substring(0, 200),
       length: sanitized.length,
@@ -118,8 +113,7 @@ interface SerpResponse {
 }
 
 /**
- * Enhanced function to generate SERP queries.
- * Produces rigorously crafted search queries with clear, actionable research goals.
+ * Generates SERP queries based on the research topic and optional previous insights.
  */
 async function generateSerpQueries({
   query,
@@ -135,26 +129,8 @@ async function generateSerpQueries({
   try {
     const promptText = `Generate ${numQueries} professional, rigorously crafted, and innovative search queries to explore the following research topic. Each query should be concise (5 to 10 words) yet descriptive, and must be paired with a brief, actionable research goal that leverages modern analytical frameworks and adheres to industry best practices.
     
-    Topic: "${query}"
-    ${learnings ? `Previous insights:\n${learnings.join('\n')}` : ''}
-    Ensure that the queries are directly aligned with the user's original intent and any provided feedback.
-    
-    Required JSON format:
-    {
-      "queries": [
-        {
-          "query": "example search query 1",
-          "researchGoal": "a precise and innovative research direction for query 1"
-        },
-        {
-          "query": "example search query 2",
-          "researchGoal": "a precise and innovative research direction for query 2"
-        }
-      ]
-    };`;
-    
 Topic: "${query}"
-${learnings ? Previous insights:\n${learnings.join('\n')} : ''}
+${learnings ? `Previous insights:\n${learnings.join('\n')}` : ''}
 Ensure that the queries are directly aligned with the user's original intent and any provided feedback.
 
 Required JSON format:
@@ -169,12 +145,12 @@ Required JSON format:
       "researchGoal": "a precise and innovative research direction for query 2"
     }
   ]
-};
+};`;
     const tokenCount = encoder.encode(promptText).length;
     logger.debug('generateSerpQueries prompt token count', { tokenCount });
 
     if (tokenCount > getMaxContextTokens(selectedModel)) {
-      logger.warn(Prompt too long (${tokenCount} tokens), truncating learnings...);
+      logger.warn(`Prompt too long (${tokenCount} tokens), truncating learnings...`);
       if (learnings && learnings.length > 0) {
         const truncatedLearnings = learnings.slice(-3);
         return generateSerpQueries({
@@ -202,12 +178,12 @@ Required JSON format:
           .min(1)
           .max(numQueries),
       }),
-      temperature: 0.7,
+      temperature: 0.6,
       maxTokens: 1000,
     });
 
     const serpResponse = res.object as SerpResponse;
-    logger.info(Created ${serpResponse.queries.length} queries, { queries: serpResponse.queries });
+    logger.info(`Created ${serpResponse.queries.length} queries`, { queries: serpResponse.queries });
     return serpResponse.queries.slice(0, numQueries);
   } catch (error) {
     logger.error('Error generating SERP queries', { error });
@@ -217,11 +193,11 @@ Required JSON format:
         researchGoal: 'Explore basic concepts and current trends',
       },
       {
-        query: ${query} latest developments,
+        query: `${query} latest developments`,
         researchGoal: 'Focus on recent innovations and updates',
       },
       {
-        query: ${query} detailed analysis,
+        query: `${query} detailed analysis`,
         researchGoal: 'Deep dive into specific aspects and implications',
       },
     ].slice(0, numQueries);
@@ -229,8 +205,7 @@ Required JSON format:
 }
 
 /**
- * Enhanced function to process SERP results.
- * Analyzes search results to generate evidence‑based insights and thought‑provoking follow‑up questions.
+ * Processes SERP results to extract key insights and follow‑up questions.
  */
 async function processSerpResult({
   query,
@@ -256,13 +231,13 @@ async function processSerpResult({
     }
   });
 
-  const validUrls = validIndexes.map(i => result[i]!);
+  const validUrls = validIndexes.map((i) => result[i]!);
 
-  logger.info(Ran "${query}", retrieved content for ${validUrls.length} URLs);
+  logger.info(`Ran "${query}", retrieved content for ${validUrls.length} URLs`);
 
   try {
-    let trimmedContents = rawContents.map(content => content ?? '').join('\n\n');
-    let promptText = Conduct a rigorous and scholarly analysis of the following search results for "${query}". Generate ${numLearnings} key insights and ${numFollowUpQuestions} thought‑provoking follow‑up questions that are deeply grounded in current research trends and critical evaluation. Additionally, ensure that all insights and questions directly reflect the user's original research intent and any prior feedback.${includeTopUrls ? ' Also, identify candidate top recommendations with clear, evidence‑based justification.' : ''}
+    let trimmedContents = rawContents.map((content) => content ?? '').join('\n\n');
+    let promptText = `Conduct a rigorous and scholarly analysis of the following search results for "${query}". Generate ${numLearnings} key insights and ${numFollowUpQuestions} thought‑provoking follow‑up questions that are deeply grounded in current research trends and critical evaluation. Additionally, ensure that all insights and questions directly reflect the user's original research intent and any prior feedback.${includeTopUrls ? ' Also, identify candidate top recommendations with clear, evidence‑based justification.' : ''}
 
 Search Results:
 ${trimmedContents}
@@ -278,19 +253,19 @@ Required JSON format:
     "First probing follow‑up question",
     "Second probing follow‑up question",
     "Third probing follow‑up question"
-  ]${includeTopUrls ? ,
+  ]${includeTopUrls ? `,
   "topUrls": [
     { "url": "http://example.com", "description": "Evidence‑based justification for this recommendation" }
-  ] : ''}
-};
+  ]` : ''}
+};`;
     let tokenCount = encoder.encode(promptText).length;
     logger.debug('processSerpResult initial prompt token count', { tokenCount });
     const trimSizes = [8000, 4000, 2000, 1000, 500];
     for (const trimSize of trimSizes) {
       if (tokenCount <= getMaxContextTokens(selectedModel)) break;
-      logger.warn(Prompt too long (${tokenCount} tokens), trimming to ${trimSize} per content...);
-      const reTrimmed = rawContents.map(content => trimPrompt(content ?? '', trimSize)).join('\n\n');
-      promptText = Conduct a rigorous and scholarly analysis of the following search results for "${query}". Generate ${numLearnings} key insights and ${numFollowUpQuestions} thought‑provoking follow‑up questions that are deeply grounded in current research trends and critical evaluation.${includeTopUrls ? ' Also, identify candidate top recommendations with clear, evidence‑based justification.' : ''}
+      logger.warn(`Prompt too long (${tokenCount} tokens), trimming to ${trimSize} per content...`);
+      const reTrimmed = rawContents.map((content) => trimPrompt(content ?? '', trimSize)).join('\n\n');
+      promptText = `Conduct a rigorous and scholarly analysis of the following search results for "${query}". Generate ${numLearnings} key insights and ${numFollowUpQuestions} thought‑provoking follow‑up questions that are deeply grounded in current research trends and critical evaluation.${includeTopUrls ? ' Also, identify candidate top recommendations with clear, evidence‑based justification.' : ''}
 
 Search Results:
 ${reTrimmed}
@@ -306,16 +281,16 @@ Required JSON format:
     "First probing follow‑up question",
     "Second probing follow‑up question",
     "Third probing follow‑up question"
-  ]${includeTopUrls ? ,
+  ]${includeTopUrls ? `,
   "topUrls": [
     { "url": "http://example.com", "description": "Evidence‑based justification for this recommendation" }
-  ] : ''}
-};
+  ]` : ''}
+};`;
       tokenCount = encoder.encode(promptText).length;
-      logger.debug(processSerpResult prompt token count after trimming to ${trimSize}, { tokenCount });
+      logger.debug(`processSerpResult prompt token count after trimming to ${trimSize}`, { tokenCount });
     }
     if (tokenCount > getMaxContextTokens(selectedModel)) {
-      throw new Error(Prompt too long (${tokenCount} tokens) even after aggressive trimming);
+      throw new Error(`Prompt too long (${tokenCount} tokens) even after aggressive trimming`);
     }
     const res = await generateObjectSanitized({
       model: selectedModel ? createModel(selectedModel) : deepSeekModel,
@@ -342,12 +317,12 @@ Required JSON format:
     logger.error('Error processing SERP result', { error });
     return {
       learnings: [
-        Found preliminary insights about ${query},
+        `Found preliminary insights about ${query}`,
         'Additional research may be needed for deeper analysis',
         'Consider exploring related areas for further information',
       ].slice(0, numLearnings),
       followUpQuestions: [
-        What are the most critical aspects of ${query}?,
+        `What are the most critical aspects of ${query}?`,
         'What recent developments impact this topic?',
         'How does this compare with alternative perspectives?',
       ].slice(0, numFollowUpQuestions),
@@ -358,8 +333,9 @@ Required JSON format:
 }
 
 /**
- * Enhanced final report generator.
- * Composes a comprehensive, scholarly research report that is detailed and professional.
+ * Generates the final report.
+ * This function only supplies the LLM with the user input, research learnings, and verified URLs.
+ * The structure of the report is determined solely by the system prompt from src/report_prompt.ts.
  */
 export async function writeFinalReport({
   prompt,
@@ -377,46 +353,8 @@ export async function writeFinalReport({
   topUrls?: Array<{ url: string; description: string }>;
 }) {
   try {
-    let promptText = Based on the following user input and the aggregated research learnings, compose a comprehensive, scholarly research report that meets high professional standards and reflects state‑of‑the‑art analytical methodologies. The report must directly reflect and adhere to the user's original query and the subsequent feedback provided, ensuring that every key aspect and intention is thoroughly addressed.
-
-User Input (Original Query and Feedback):
-"${prompt}"
-
-Research Learnings:
-${learnings.map((learning, i) => ${i + 1}. ${learning}).join('\n')}
-
-In your report, include a dedicated section titled "User Intent and Inputs" that summarizes the user's original query and feedback responses, demonstrating a clear understanding of the research objectives.
-
-Structure the report in Markdown with the following sections:
-1. **Executive Summary**: A succinct overview of the research findings.
-2. **User Intent and Inputs**: A clear restatement and analysis of the user's original query and feedback.
-3. **Introduction**: Context, background, and the significance of the research topic.
-4. **Methodology**: A detailed explanation of the research approach and analytical techniques.
-5. **Key Insights**: In‑depth and critical findings derived from the research.
-6. **Recommendations**: Actionable strategies and directions for future research.
-7. **Conclusion**: A concise summary of the research outcomes and final reflections.
-8. **Citations**: A list of all URLs (without embedded hyperlinks) referenced in the research.
-
-IMPORTANT: Do not embed any URLs within the main content; include them only in the "Citations" section.
-
-Return the final report as a valid JSON object in the following format:
-{"reportMarkdown": "Your complete Markdown formatted report here with \\n for new lines."}
-;
-    const tokenCount = encoder.encode(promptText).length;
-    logger.debug('writeFinalReport prompt token count', { tokenCount });
-    if (tokenCount > getMaxContextTokens(selectedModel)) {
-      logger.warn(WriteFinalReport prompt too long (${tokenCount} tokens), truncating learnings...);
-      const truncatedLearnings = learnings.slice(-5);
-      const newPromptText = promptText.replace(
-        learnings.map((learning, i) => ${i + 1}. ${learning}).join('\n'),
-        truncatedLearnings.map((learning, i) => ${i + 1}. ${learning}).join('\n'),
-      );
-      const newTokenCount = encoder.encode(newPromptText).length;
-      if (newTokenCount > getMaxContextTokens(selectedModel)) {
-        throw new Error('Prompt too long even after truncating learnings');
-      }
-      promptText = newPromptText;
-    }
+    const promptText = `User Input: "${prompt}"\nResearch Learnings:\n${learnings.join('\n')}\n\nVerified URLs:\n${visitedUrls.join('\n')}`;
+    
     const res = await generateObjectSanitized({
       model: selectedModel ? createModel(selectedModel) : deepSeekModel,
       system: reportPrompt(language),
@@ -424,30 +362,14 @@ Return the final report as a valid JSON object in the following format:
       schema: z.object({
         reportMarkdown: z.string().describe('Final report on the topic in Markdown format with escaped newlines'),
       }),
-      temperature: 0.7,
+      temperature: 0.6,
       maxTokens: 8192,
     });
     const safeResult = res.object as { reportMarkdown: string };
-    const reportWithNewlines = safeResult.reportMarkdown.replace(/\\n/g, '\n');
-    const topSection = topUrls && topUrls.length > 0
-      ? \n\n## Top Recommendations\n\n${topUrls.map(item => - <span class="break-words">${item.url}</span>: ${item.description}).join('\n')}
-      : '';
-    const urlsSection = \n\n## Citations\n\n${visitedUrls.map(url => - <span class="break-words">${url}</span>).join('\n')};
-    logger.info('Final report generated');
-    return reportWithNewlines + topSection + urlsSection;
+    return safeResult.reportMarkdown.replace(/\\n/g, '\n');
   } catch (error) {
     logger.error('Error generating final report', { error });
-    const fallbackReport = # Research Report
-
-## Executive Summary
-${prompt}
-
-## Key Insights
-${learnings.map((learning, i) => ${i + 1}. ${learning}).join('\n')}
-
-## Citations
-${visitedUrls.map(url => - ${url}).join('\n')};
-    return fallbackReport;
+    return `# Research Report\n\nUser Input: ${prompt}\n\nKey Learnings:\n${learnings.join('\n')}\n\nVerified URLs:\n${visitedUrls.join('\n')}`;
   }
 }
 
@@ -456,23 +378,19 @@ interface SerpCandidates {
 }
 
 /**
- * Finalizes candidate top recommendations by performing a final LLM query to select the best ones.
- * @param candidates Array of candidate recommendations.
- * @param count Number of final recommendations desired (default 5 if not specified by the user).
- * @param selectedModel Optional model identifier.
- * @returns An array of final top recommendation objects.
+ * Finalizes candidate top recommendations.
  */
 async function finalizeTopRecommendations(
   candidates: Array<{ url: string; description: string }>,
   count: number,
   selectedModel?: string,
 ): Promise<Array<{ url: string; description: string }>> {
-  const promptText = You are a research assistant tasked with selecting the final best recommendations from the following candidate recommendations. Consider quality, relevance, and reliability. Please select the final best ${count} recommendations.
+  const promptText = `You are a research assistant tasked with selecting the final best recommendations from the following candidate recommendations. Consider quality, relevance, and reliability. Please select the final best ${count} recommendations.
 
 Candidate Recommendations:
 ${JSON.stringify(candidates, null, 2)}
 
-Return the result as a JSON object with a key "finalTopUrls" that is an array of objects, each having "url" and "description".;
+Return the result as a JSON object with a key "finalTopUrls" that is an array of objects, each having "url" and "description".`;
   const res = await generateObjectSanitized({
     model: selectedModel ? createModel(selectedModel) : deepSeekModel,
     system: systemPrompt(),
@@ -480,15 +398,14 @@ Return the result as a JSON object with a key "finalTopUrls" that is an array of
     schema: z.object({
       finalTopUrls: z.array(z.object({ url: z.string(), description: z.string() })),
     }),
-    temperature: 0.7,
+    temperature: 0.6,
     maxTokens: 1000,
   });
   return res.object.finalTopUrls;
 }
 
 /**
- * Modified deepResearch function with an optional progressCallback to send progress updates.
- * Also supports continuation research via previous context (learned so far).
+ * Performs deep research with optional progress updates and supports continuation research.
  */
 export async function deepResearch({
   query,
@@ -512,7 +429,7 @@ export async function deepResearch({
   sites?: string[];
 }): Promise<ResearchResult> {
   logger.info('deepResearch started', { query, breadth, depth, selectedModel, sites });
-  progressCallback && progressCallback(PROGRESS: Depth: ${depth}, Breadth: ${breadth});
+  progressCallback && progressCallback(`PROGRESS: Depth: ${depth}, Breadth: ${breadth}`);
 
   const maxAllowedConcurrency = selectedModel ? getMaxConcurrency(selectedModel) : 1;
   const effectiveConcurrency = Math.min(concurrency, maxAllowedConcurrency);
@@ -526,16 +443,17 @@ export async function deepResearch({
   });
 
   const results = await Promise.all(
-    serpQueries.map(serpQuery =>
+    serpQueries.map((serpQuery) =>
       requestLimit(async () => {
         try {
-          progressCallback && progressCallback(Searching for "${serpQuery.query}"...);
+          progressCallback && progressCallback(`Searching for "${serpQuery.query}"...`);
           const urls = await googleService.googleSearch(serpQuery.query, 10, sites);
-          progressCallback && progressCallback(Found ${urls.length} results for "${serpQuery.query}". Processing...);
+          progressCallback && progressCallback(`Found ${urls.length} results for "${serpQuery.query}". Processing...`);
           logger.info('Processing SERP result', { query: serpQuery.query, urlsCount: urls.length });
-          // Determine whether to include top URLs based on the query content
           const lowerSerpQuery = serpQuery.query.toLowerCase();
-          const includeTopUrls = lowerSerpQuery.includes('best') && (lowerSerpQuery.includes('price') || lowerSerpQuery.includes('quality'));
+          const includeTopUrls =
+            lowerSerpQuery.includes('best') &&
+            (lowerSerpQuery.includes('price') || lowerSerpQuery.includes('quality'));
           const newLearnings = await processSerpResult({
             query: serpQuery.query,
             result: urls,
@@ -543,21 +461,20 @@ export async function deepResearch({
             selectedModel,
             includeTopUrls,
           });
-          progressCallback && progressCallback(Processed "${serpQuery.query}" and generated ${newLearnings.learnings.length} insights.);
+          progressCallback && progressCallback(`Processed "${serpQuery.query}" and generated ${newLearnings.learnings.length} insights.`);
           const allLearnings = [...learnings, ...newLearnings.learnings];
           const allUrls: string[] = [...visitedUrls, ...newLearnings.visitedUrls].filter(
             (u): u is string => u !== undefined,
           );
-          // Collect topUrls from each SERP result
           const currentTopUrls = newLearnings.topUrls || [];
           const newDepth = depth - 1;
           if (newDepth > 0) {
             logger.info('Researching deeper', { nextBreadth: Math.ceil(breadth / 2), nextDepth: newDepth });
-            progressCallback && progressCallback(PROGRESS: Depth: ${newDepth}, Breadth: ${Math.ceil(breadth / 2)});
-            const nextQuery = 
+            progressCallback && progressCallback(`PROGRESS: Depth: ${newDepth}, Breadth: ${Math.ceil(breadth / 2)}`);
+            const nextQuery = `
             Previous research goal: ${serpQuery.researchGoal}
-            Follow-up research directions: ${newLearnings.followUpQuestions.map(q => \n${q}).join('')}
-          .trim();
+            Follow-up research directions: ${newLearnings.followUpQuestions.map((q) => `\n${q}`).join('')}
+          `.trim();
             const deeperResult = await deepResearch({
               query: nextQuery,
               breadth: Math.ceil(breadth / 2),
@@ -582,7 +499,7 @@ export async function deepResearch({
             };
           }
         } catch (e) {
-          logger.error(Error running query: ${serpQuery.query}, { error: e });
+          logger.error(`Error running query: ${serpQuery.query}`, { error: e });
           return {
             learnings: [],
             visitedUrls: [],
@@ -593,16 +510,15 @@ export async function deepResearch({
     )
   );
 
-  const allLearnings = [...new Set(results.flatMap(r => r.learnings))];
+  const allLearnings = [...new Set(results.flatMap((r) => r.learnings))];
   const allVisitedUrls = [
-    ...new Set(results.flatMap(r => r.visitedUrls.filter((u): u is string => u !== undefined))),
+    ...new Set(results.flatMap((r) => r.visitedUrls.filter((u): u is string => u !== undefined))),
   ];
-  const allTopUrls = results.flatMap(r => r.topUrls);
-  const uniqueTopUrls = Array.from(new Map(allTopUrls.map(item => [item.url, item])).values());
+  const allTopUrls = results.flatMap((r) => r.topUrls);
+  const uniqueTopUrls = Array.from(new Map(allTopUrls.map((item) => [item.url, item])).values());
 
   let finalTopUrls = uniqueTopUrls;
   if (finalTopUrls.length > 0) {
-    // Check if the query specifies a number for top recommendations using a regex e.g., "top 3" or "top 7"
     const match = query.match(/top\s+(\d+)/i);
     const recommendedCount = match && match[1] ? parseInt(match[1]) : 5;
     finalTopUrls = await finalizeTopRecommendations(uniqueTopUrls, recommendedCount, selectedModel);
