@@ -1,15 +1,16 @@
 import { getEncoding } from 'js-tiktoken';
 import { Model } from '../types/ai';
 import pLimit from 'p-limit';
-
 import { RecursiveCharacterTextSplitter } from './text-splitter';
 import { logger, addTokenUsage } from '../api/utils/logger';
+import { systemPrompt } from '../prompt';
+import { generateObjectSanitized } from '../deep-research';
 
 const BASE_URL = 'https://api.venice.ai/api/v1';
 const VENICE_API_KEY = process.env.VENICE_API_KEY!;
 
-// Use CONTEXT_SIZE env var if provided, else default to 120000 tokens.
-const DEFAULT_CONTEXT_SIZE = process.env.CONTEXT_SIZE ? parseInt(process.env.CONTEXT_SIZE) : 120000;
+// Use the CONTEXT_SIZE env var (defaulting to 120000 if not set)
+const DEFAULT_CONTEXT_SIZE = Number(process.env.CONTEXT_SIZE) || 120000;
 
 /**
  * Custom VeniceAI function to call Venice chat completions.
@@ -132,9 +133,8 @@ export const o3MiniModel = VeniceAI('o3-mini', {
   structuredOutputs: true,
 });
 
-// NEW: Summarization model using the new environment variable.
-export const VENICE_SUMMARIZATION_MODEL = process.env.VENICE_SUMMARIZATION_MODEL || 'default-summarization-model';
-export const summarizationModel = VeniceAI(VENICE_SUMMARIZATION_MODEL, {
+// Summarization model for dynamic content summarization
+export const summarizationModel = VeniceAI(process.env.VENICE_SUMMARIZATION_MODEL || 'summarization-default-model', {
   structuredOutputs: true,
 });
 
@@ -144,7 +144,7 @@ export const encoder = getEncoding('o200k_base');
 /**
  * Trim prompt to maximum context size.
  */
-export function trimPrompt(prompt: string, contextSize = DEFAULT_CONTEXT_SIZE) {
+export function trimPrompt(prompt: string, contextSize: number = DEFAULT_CONTEXT_SIZE) {
   if (!prompt) {
     return '';
   }
@@ -175,4 +175,22 @@ export function trimPrompt(prompt: string, contextSize = DEFAULT_CONTEXT_SIZE) {
 
   // Recursively trim until the prompt is within the context size.
   return trimPrompt(trimmedPrompt, contextSize);
+}
+
+/**
+ * Summarize a given text into an executive summary in bullet points.
+ */
+export async function summarizeText(text: string, selectedModel?: string): Promise<string> {
+  const promptText = `Please provide an executive summary of the following content in concise bullet points, highlighting the key insights:\n\n${text}\n\nBullet points:`;
+  const res = await generateObjectSanitized({
+    model: selectedModel ? createModel(selectedModel) : summarizationModel,
+    system: systemPrompt(),
+    prompt: promptText,
+    schema: (await import('zod')).z.object({
+      summary: (await import('zod')).z.string().describe('Executive summary in bullet points'),
+    }),
+    temperature: 0.6,
+    maxTokens: 800,
+  });
+  return res.object.summary;
 }
