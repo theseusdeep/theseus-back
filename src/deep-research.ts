@@ -7,104 +7,11 @@ import {
   createModel,
   deepSeekModel,
   DEFAULT_MODEL,
-  summarizationModel,
 } from './ai/providers';
 import { systemPrompt } from './prompt';
 import { reportPrompt } from './report_prompt';
 import { googleService } from './api/googleService';
 import { logger } from './api/utils/logger';
-
-/**
- * Remove any <think>...</think> blocks. If a "{" exists, return the substring
- * from the first "{" to the last "}".
- */
-export function sanitizeDeepSeekOutput(raw: string): string {
-  const withoutThink = raw.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-  const firstBrace = withoutThink.indexOf('{');
-  if (firstBrace === -1) {
-    return withoutThink;
-  }
-  const lastBrace = withoutThink.lastIndexOf('}');
-  if (lastBrace === -1 || lastBrace < firstBrace) {
-    return withoutThink.slice(firstBrace).trim();
-  }
-  return withoutThink.slice(firstBrace, lastBrace + 1).trim();
-}
-
-/**
- * NEW: Summarize long-form content into concise bullet points.
- */
-export async function summarizeContent(text: string): Promise<string> {
-  try {
-    const promptText = `Summarize the following content into concise bullet points:\n\n${text}\n\nBullet Points:`;
-    const res = await generateObjectSanitized({
-      model: summarizationModel,
-      system: 'You are a summarization assistant. Provide bullet points.',
-      prompt: promptText,
-      schema: z.object({
-        summary: z.string().describe('Summarized bullet points'),
-      }),
-      temperature: 0.5,
-      maxTokens: 500,
-    });
-    return res.object.summary;
-  } catch (error) {
-    logger.error('Error summarizing content', { error });
-    return text;
-  }
-}
-
-/**
- * NEW: Quality Control Check – review the report for coherence and completeness.
- */
-export async function qualityControlReview(report: string, selectedModel?: string): Promise<string> {
-  try {
-    const promptText = `Review the following research report for coherence, completeness, and logical flow. Provide an improved version if necessary. Return the final report without any additional commentary.\n\nReport:\n${report}`;
-    const res = await generateObjectSanitized({
-      model: selectedModel ? createModel(selectedModel) : deepSeekModel,
-      system: systemPrompt(),
-      prompt: promptText,
-      schema: z.object({
-        revisedReport: z.string().describe('Revised research report'),
-      }),
-      temperature: 0.5,
-      maxTokens: 8192,
-    });
-    return res.object.revisedReport;
-  } catch (error) {
-    logger.error('Error in quality control review', { error });
-    return report;
-  }
-}
-
-/**
- * NEW: Iterative Self-Critique – have the model review its own chain-of-thought.
- */
-export async function selfCritiqueReview(report: string, selectedModel?: string): Promise<string> {
-  try {
-    const promptText = `Perform a self-critique of the following research report. List any uncertainties, potential gaps, or areas for improvement, and then provide a revised version that addresses these issues. Return only the final revised report in valid JSON format with key "finalReport".\n\nReport:\n${report}`;
-    const res = await generateObjectSanitized({
-      model: selectedModel ? createModel(selectedModel) : deepSeekModel,
-      system: systemPrompt(),
-      prompt: promptText,
-      schema: z.object({
-        finalReport: z.string().describe('Final revised research report after self-critique'),
-      }),
-      temperature: 0.5,
-      maxTokens: 8192,
-    });
-    return res.object.finalReport;
-  } catch (error) {
-    logger.error('Error in self critique review', { error });
-    return report;
-  }
-}
-
-interface ResearchResult {
-  learnings: string[];
-  visitedUrls: string[];
-  topUrls: Array<{ url: string; description: string }>;
-}
 
 function getMaxContextTokens(model?: string) {
   return model === DEFAULT_MODEL ? 131072 : 8000;
@@ -134,7 +41,80 @@ export interface ResearchResult {
 }
 
 /**
+ * Remove any <think>...</think> blocks. If a "{" exists, return the substring
+ * from the first "{" to the last "}".
+ */
+export function sanitizeDeepSeekOutput(raw: string): string {
+  const withoutThink = raw.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  const firstBrace = withoutThink.indexOf('{');
+  if (firstBrace === -1) {
+    return withoutThink;
+  }
+  const lastBrace = withoutThink.lastIndexOf('}');
+  if (lastBrace === -1 || lastBrace < firstBrace) {
+    return withoutThink.slice(firstBrace).trim();
+  }
+  return withoutThink.slice(firstBrace, lastBrace + 1).trim();
+}
+
+/**
+ * Calls the model ensuring the Venice parameter is always included.
+ * Logs the prompts and sanitizes the response.
+ */
+export async function generateObjectSanitized<T>(params: any): Promise<{ object: T }> {
+  let res;
+  logger.debug('generateObjectSanitized called', {
+    model: params.model.modelId,
+    system: params.system,
+    prompt: params.prompt,
+  });
+
+  // Always force include_venice_system_prompt to false.
+  params.venice_parameters = { include_venice_system_prompt: false };
+
+  res = await params.model(params);
+
+  if (params.model.modelId === DEFAULT_MODEL) {
+    logger.info('Received response from Venice API', { response: res });
+    const rawText = res.choices && res.choices[0]?.message?.content;
+    if (!rawText) {
+      throw new Error('No response text received from Venice API');
+    }
+    logger.debug('Raw text from Venice API', { rawText: rawText.substring(0, 300) });
+    const sanitized = sanitizeDeepSeekOutput(rawText);
+    logger.debug('Sanitized text', {
+      snippet: sanitized.substring(0, 200),
+      length: sanitized.length,
+    });
+    try {
+      const parsed = JSON.parse(sanitized);
+      logger.debug('Parsed sanitized output', { parsed });
+      return { object: parsed };
+    } catch (error: any) {
+      logger.error('Error parsing sanitized output', {
+        error: error.message,
+        sanitizedSnippet: sanitized.substring(0, 200),
+        sanitizedLength: sanitized.length,
+      });
+      throw error;
+    }
+  } else {
+    return { object: res } as { object: T };
+  }
+}
+
+interface SerpQuery {
+  query: string;
+  researchGoal: string;
+}
+
+interface SerpResponse {
+  queries: SerpQuery[];
+}
+
+/**
  * Generates SERP queries based on the research topic and optional previous insights.
+ * This prompt now explicitly sets the Exploratory Phase—asking for a diverse set of hypotheses.
  */
 async function generateSerpQueries({
   query,
@@ -148,11 +128,11 @@ async function generateSerpQueries({
   selectedModel?: string;
 }) {
   try {
-    const promptText = `Generate ${numQueries} professional, rigorously crafted, and innovative search queries to explore the following research topic from multiple perspectives and hypotheses. Each query should be concise (5 to 10 words) yet descriptive, and must be paired with a brief, actionable research goal that leverages modern analytical frameworks and adheres to industry best practices.
-    
+    const promptText = `In the Exploratory Phase, generate ${numQueries} professional, rigorously crafted, and innovative search queries that cover diverse hypotheses and potential research directions for the following topic. Each query should be concise (5 to 10 words) yet descriptive, and must be paired with a brief, actionable research goal that leverages modern analytical frameworks and industry best practices.
+
 Topic: "${query}"
 ${learnings ? `Previous insights:\n${learnings.join('\n')}` : ''}
-Ensure that the queries cover a broad range of angles, starting with a wide exploratory phase before narrowing down on specific directions.
+Ensure that the queries are directly aligned with the user's original intent and any provided feedback.
 
 Required JSON format:
 {
@@ -203,7 +183,7 @@ Required JSON format:
       maxTokens: 1000,
     });
 
-    const serpResponse = res.object as { queries: Array<{ query: string; researchGoal: string }> };
+    const serpResponse = res.object as SerpResponse;
     logger.info(`Created ${serpResponse.queries.length} queries`, { queries: serpResponse.queries });
     return serpResponse.queries.slice(0, numQueries);
   } catch (error) {
@@ -374,11 +354,9 @@ export async function writeFinalReport({
   topUrls?: Array<{ url: string; description: string }>;
 }) {
   try {
-    // Format visited URLs as clickable markdown hyperlinks.
-    const citationsMarkdown = visitedUrls.map(url => `[${url}](${url})`).join('\n');
-    const promptText = `User Input: "${prompt}"\nResearch Learnings:\n${learnings.join('\n')}\n\nCitations:\n${citationsMarkdown}`;
-
-    let res = await generateObjectSanitized({
+    const promptText = `User Input: "${prompt}"\nResearch Learnings:\n${learnings.join('\n')}\n\nVerified URLs:\n${visitedUrls.join('\n')}`;
+    
+    const res = await generateObjectSanitized({
       model: selectedModel ? createModel(selectedModel) : deepSeekModel,
       system: reportPrompt(language),
       prompt: promptText,
@@ -388,18 +366,11 @@ export async function writeFinalReport({
       temperature: 0.6,
       maxTokens: 8192,
     });
-    let finalReport = res.object.reportMarkdown.replace(/\\n/g, '\n');
-
-    // NEW: Run quality control check.
-    finalReport = await qualityControlReview(finalReport, selectedModel);
-
-    // NEW: Run iterative self‑critique.
-    finalReport = await selfCritiqueReview(finalReport, selectedModel);
-
-    return finalReport;
+    const safeResult = res.object as { reportMarkdown: string };
+    return safeResult.reportMarkdown.replace(/\\n/g, '\n');
   } catch (error) {
     logger.error('Error generating final report', { error });
-    return `# Research Report\n\nUser Input: ${prompt}\n\nKey Learnings:\n${learnings.join('\n')}\n\nCitations:\n${visitedUrls.join('\n')}`;
+    return `# Research Report\n\nUser Input: ${prompt}\n\nKey Learnings:\n${learnings.join('\n')}\n\nVerified URLs:\n${visitedUrls.join('\n')}`;
   }
 }
 
@@ -455,7 +426,7 @@ export async function deepResearch({
   sites?: string[];
 }): Promise<ResearchResult> {
   logger.info('deepResearch started', { query, breadth, depth, selectedModel, sites });
-  progressCallback && progressCallback(`Exploratory Phase: Generating initial search queries...`);
+  progressCallback && progressCallback(`PROGRESS: Depth: ${depth}, Breadth: ${breadth}`);
 
   const maxAllowedConcurrency = selectedModel ? getMaxConcurrency(selectedModel) : 1;
   const effectiveConcurrency = Math.min(concurrency, maxAllowedConcurrency);
@@ -487,7 +458,7 @@ export async function deepResearch({
             selectedModel,
             includeTopUrls,
           });
-          progressCallback && progressCallback(`Deep Dive Phase: Processed "${serpQuery.query}" and generated ${newLearnings.learnings.length} insights.`);
+          progressCallback && progressCallback(`Processed "${serpQuery.query}" and generated ${newLearnings.learnings.length} insights.`);
           const allLearnings = [...learnings, ...newLearnings.learnings];
           const allUrls: string[] = [...visitedUrls, ...newLearnings.visitedUrls].filter(
             (u): u is string => u !== undefined,
@@ -496,11 +467,12 @@ export async function deepResearch({
           const newDepth = depth - 1;
           if (newDepth > 0) {
             logger.info('Researching deeper', { nextBreadth: Math.ceil(breadth / 2), nextDepth: newDepth });
-            progressCallback && progressCallback(`Deep Dive Phase: Researching deeper with Depth: ${newDepth}, Breadth: ${Math.ceil(breadth / 2)}`);
+            progressCallback && progressCallback(`PROGRESS: Depth: ${newDepth}, Breadth: ${Math.ceil(breadth / 2)}`);
             const nextQuery = `
-            Previous research goal: ${serpQuery.researchGoal}
-            Follow-up research directions: ${newLearnings.followUpQuestions.map((q) => `\n${q}`).join('')}
-          `.trim();
+[Deep Dive Phase] Based on the previous research goal: "${serpQuery.researchGoal}" and the following follow-up research directions:
+${newLearnings.followUpQuestions.map((q) => `- ${q}`).join('\n')}
+Please narrow the focus to the most promising research direction and generate a targeted query for further investigation.
+            `.trim();
             const deeperResult = await deepResearch({
               query: nextQuery,
               breadth: Math.ceil(breadth / 2),
@@ -550,7 +522,6 @@ export async function deepResearch({
     finalTopUrls = await finalizeTopRecommendations(uniqueTopUrls, recommendedCount, selectedModel);
   }
 
-  progressCallback && progressCallback(`Synthesis Phase: Merging insights and finalizing research report.`);
   const finalResult: ResearchResult = {
     learnings: allLearnings,
     visitedUrls: allVisitedUrls,
@@ -562,4 +533,26 @@ export async function deepResearch({
     topUrlsCount: finalResult.topUrls.length,
   });
   return finalResult;
+}
+
+/**
+ * Quality Control Check: Review the generated report for coherence, completeness, and clarity.
+ * If improvements are needed, return a revised version; otherwise, return the original report.
+ */
+export async function qualityControlReview(report: string, selectedModel?: string, language?: string): Promise<string> {
+  const promptText = `Please review the following research report for coherence, completeness, and clarity. If improvements are necessary, provide a revised version of the report in Markdown format. If the report is already optimal, simply return it unchanged. Do not include any commentary or explanations; return only the revised report.
+
+Report:
+${report}`;
+  const res = await generateObjectSanitized({
+    model: selectedModel ? createModel(selectedModel) : deepSeekModel,
+    system: systemPrompt(),
+    prompt: promptText,
+    schema: z.object({
+      revisedReport: z.string().describe('Revised report after quality control'),
+    }),
+    temperature: 0.6,
+    maxTokens: 8192,
+  });
+  return res.object.revisedReport;
 }
