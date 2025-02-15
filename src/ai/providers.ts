@@ -8,6 +8,8 @@ import { logger, addTokenUsage } from '../api/utils/logger';
 const BASE_URL = 'https://api.venice.ai/api/v1';
 const VENICE_API_KEY = process.env.VENICE_API_KEY!;
 
+const defaultContextSize = process.env.CONTEXT_SIZE ? parseInt(process.env.CONTEXT_SIZE) : 120000;
+
 /**
  * Custom VeniceAI function to call Venice chat completions.
  * It returns an async function that accepts parameters and always sends a request body
@@ -129,14 +131,19 @@ export const o3MiniModel = VeniceAI('o3-mini', {
   structuredOutputs: true,
 });
 
+// NEW: Summarization model for dynamic content summarization (Task 2)
+export const summarizationModel = VeniceAI(
+  process.env.VENICE_SUMMARIZATION_MODEL || 'venice-summarization-default',
+  { structuredOutputs: true }
+);
+
 const MinChunkSize = 140;
 export const encoder = getEncoding('o200k_base');
 
 /**
  * Trim prompt to maximum context size.
- * The context size is now determined by the CONTEXT_SIZE environment variable.
  */
-export function trimPrompt(prompt: string, contextSize = process.env.CONTEXT_SIZE ? parseInt(process.env.CONTEXT_SIZE) : 120_000) {
+export function trimPrompt(prompt: string, contextSize = defaultContextSize) {
   if (!prompt) {
     return '';
   }
