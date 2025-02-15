@@ -1,4 +1,4 @@
-import { logger } from '../api/utils/logger';
+import { logger } from './utils/logger';
 
 const EXTERNAL_API_KEY = process.env.SEARCH_API_KEY || '';
 
@@ -19,28 +19,22 @@ export class GoogleService {
    * @param query The search query
    * @param maxResults Maximum number of results to retrieve
    * @param sites Optional array of website URLs to restrict the search.
-   * @param timeframe Relative time filter for search results. Allowed values: "24h", "week", "month", "year".
    * @returns An array of result URLs
    */
-  public async googleSearch(
-    query: string,
-    maxResults: number,
-    sites?: string[],
-    timeframe: string = 'month'
-  ): Promise<string[]> {
-    logger.debug('GoogleService: googleSearch called', { query, maxResults, sites, timeframe });
+  public async googleSearch(query: string, maxResults: number, sites?: string[]): Promise<string[]> {
+    logger.debug('GoogleService: googleSearch called', { query, maxResults, sites });
     if (!EXTERNAL_API_KEY) {
       logger.error('Missing SEARCH_API_KEY environment variable');
       return [];
     }
 
-    let searchUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(
+    let searchUrl = https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(
       query,
-    )}&max_results=${maxResults}&timeframe=${encodeURIComponent(timeframe)}`;
+    )}&max_results=${maxResults};
 
     if (sites && sites.length > 0) {
       for (const site of sites) {
-        searchUrl += `&sites=${encodeURIComponent(site)}`;
+        searchUrl += &sites=${encodeURIComponent(site)};
       }
     }
 
@@ -61,14 +55,7 @@ export class GoogleService {
 
       const json = await response.json();
       const results: string[] = Array.isArray(json.results) ? json.results : [];
-      logger.info('External search API succeeded', { resultsCount: results.length, timeframe });
-      // If too few results and timeframe was strict, retry with a broader timeframe.
-      if (results.length < 3 && timeframe !== 'year') {
-        logger.info('Insufficient results with timeframe', { timeframe, resultsCount: results.length, retryingWith: 'year' });
-        const fallbackResults = await this.googleSearch(query, maxResults, sites, 'year');
-        const mergedResults = Array.from(new Set([...results, ...fallbackResults]));
-        return mergedResults.slice(0, maxResults);
-      }
+      logger.info('External search API succeeded', { resultsCount: results.length });
       return results.slice(0, maxResults);
     } catch (e: any) {
       logger.error('Error calling external search API', {
@@ -180,5 +167,3 @@ export class GoogleService {
     }
   }
 }
-
-export const googleService = new GoogleService();
