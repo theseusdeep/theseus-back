@@ -28,13 +28,11 @@ export class GoogleService {
       return [];
     }
 
-    let searchUrl = https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(
-      query,
-    )}&max_results=${maxResults};
+    let searchUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}`;
 
     if (sites && sites.length > 0) {
       for (const site of sites) {
-        searchUrl += &sites=${encodeURIComponent(site)};
+        searchUrl += `&sites=${encodeURIComponent(site)}`;
       }
     }
 
