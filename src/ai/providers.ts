@@ -51,14 +51,15 @@ function VeniceAI(model: string, options: any = {}) {
     };
 
     logger.debug('Calling VeniceAI API', { model, body });
-    const response = await fetch(${BASE_URL}/chat/completions, {
+    const response = await fetch(`${BASE_URL}/chat/completions`, {
       method: 'POST',
       headers: {
-        Authorization: Bearer ${VENICE_API_KEY},
+        'Authorization': `Bearer ${VENICE_API_KEY}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(body)
     });
+
     const jsonResponse = await response.json();
     if (jsonResponse && jsonResponse.usage) {
       addTokenUsage(jsonResponse.usage);
