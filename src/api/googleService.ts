@@ -8,10 +8,7 @@ const EXTERNAL_API_KEY = process.env.SEARCH_API_KEY || '';
  */
 export class GoogleService {
   constructor() {
-    logger.info(
-      'GoogleService initialized using external API for search & scraping',
-      { apiKeyPresent: !!EXTERNAL_API_KEY },
-    );
+    logger.info('GoogleService initialized using external API for search & scraping', { apiKeyPresent: !!EXTERNAL_API_KEY });
   }
 
   /**
@@ -60,7 +57,7 @@ export class GoogleService {
       const results: string[] = Array.isArray(json.results) ? json.results : [];
       logger.info('External search API succeeded', { resultsCount: results.length });
 
-      // If very few results, try a fallback with a less restrictive timeframe.
+      // If very few results, try a fallback with a less restrictive timeframe ("month").
       if (results.length < 3) {
         logger.info('Few results obtained, retrying with less restrictive timeframe', { currentTimeframe: timeframe });
         const fallbackTimeframe = "month";
@@ -78,7 +75,29 @@ export class GoogleService {
         if (fallbackResponse.ok) {
           const fallbackJson = await fallbackResponse.json();
           const fallbackResults: string[] = Array.isArray(fallbackJson.results) ? fallbackJson.results : [];
-          // Merge and deduplicate results.
+          // If still very few results, do an extra fallback with no timeframe parameter.
+          if (fallbackResults.length < 3) {
+            logger.info('Fallback with "month" timeframe returned few results, retrying with no timeframe parameter');
+            let extraFallbackUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}`;
+            if (sites && sites.length > 0) {
+              for (const site of sites) {
+                extraFallbackUrl += `&sites=${encodeURIComponent(site)}`;
+              }
+            }
+            const extraFallbackResponse = await fetch(extraFallbackUrl, {
+              headers: {
+                'x-api-key': EXTERNAL_API_KEY,
+              },
+            });
+            if (extraFallbackResponse.ok) {
+              const extraFallbackJson = await extraFallbackResponse.json();
+              const extraFallbackResults: string[] = Array.isArray(extraFallbackJson.results) ? extraFallbackJson.results : [];
+              const mergedResults = Array.from(new Set([...results, ...fallbackResults, ...extraFallbackResults]));
+              logger.info('Merged extra fallback results', { mergedCount: mergedResults.length });
+              return mergedResults.slice(0, maxResults);
+            }
+          }
+          // Merge and deduplicate results from primary and "month" fallback.
           const mergedResults = Array.from(new Set([...results, ...fallbackResults]));
           logger.info('Merged fallback results', { mergedCount: mergedResults.length });
           return mergedResults.slice(0, maxResults);
