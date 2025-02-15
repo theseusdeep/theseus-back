@@ -379,7 +379,8 @@ export async function generateSummary(content: string, selectedModel?: string): 
 
 /**
  * Generates the final report.
- * This function only supplies the LLM with the user input, research learnings, and verified URLs.
+ * This function only supplies the LLM with the user input, research learnings, and then
+ * appends a Citations section containing exactly the verified URLs used in the research.
  * The structure of the report is determined solely by the system prompt from src/report_prompt.ts.
  */
 export async function writeFinalReport({
@@ -407,9 +408,7 @@ ${executiveSummary}
 
 User Input: "${prompt}"
 Research Learnings:
-${learnings.join('\n')}
-\nVerified URLs:
-${visitedUrls.join('\n')}`;
+${learnings.join('\n')}`;
     
     const res = await generateObjectSanitized({
       model: selectedModel ? createModel(selectedModel) : deepSeekModel,
@@ -422,10 +421,26 @@ ${visitedUrls.join('\n')}`;
       maxTokens: 8192,
     });
     const safeResult = res.object as { reportMarkdown: string };
-    return safeResult.reportMarkdown.replace(/\\n/g, '\n');
+    let reportMarkdown = safeResult.reportMarkdown.replace(/\\n/g, '\n');
+    // Generate the Citations section using the visitedUrls provided
+    let citationsSection = '\n\n## Citations\n';
+    visitedUrls.forEach(url => {
+      citationsSection += `- [${url}](${url})\n`;
+    });
+    // If the generated reportMarkdown already contains a Citations section, replace it; otherwise, append it.
+    if (reportMarkdown.includes('## Citations')) {
+      reportMarkdown = reportMarkdown.replace(/## Citations[\s\S]*/, citationsSection);
+    } else {
+      reportMarkdown += citationsSection;
+    }
+    return reportMarkdown;
   } catch (error) {
     logger.error('Error generating final report', { error });
-    return `# Research Report\n\nUser Input: ${prompt}\n\nKey Learnings:\n${learnings.join('\n')}\n\nVerified URLs:\n${visitedUrls.join('\n')}`;
+    let citationsSection = '\n\n## Citations\n';
+    visitedUrls.forEach(url => {
+      citationsSection += `- [${url}](${url})\n`;
+    });
+    return `# Research Report\n\nUser Input: ${prompt}\n\nKey Learnings:\n${learnings.join('\n')}\n\n${citationsSection}`;
   }
 }
 
