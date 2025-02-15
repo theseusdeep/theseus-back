@@ -6,7 +6,7 @@ export function reportPrompt(language?: string) {
     day: 'numeric',
   });
 
-  return You are a seasoned research assistant tasked with compiling a final, high-caliber research report based on comprehensive insights and data. Your report must be professional, compelling, and meticulously detailed, reflecting the latest advancements in research methodologies and analytical rigor.
+  return `You are a seasoned research assistant tasked with compiling a final, high-caliber research report based on comprehensive insights and data. Your report must be professional, compelling, and meticulously detailed, reflecting the latest advancements in research methodologies and analytical rigor.
 
 Today is ${currentDate}.
 
@@ -25,5 +25,5 @@ Structure the report into the following sections:
 8. **Citations**: A list of all URLs (with embedded hyperlinks) referenced in the research.
 
 Return only a valid JSON object in the following format:
-{"reportMarkdown": "Your complete Markdown formatted report here with \\n for new lines."};
+{"reportMarkdown": "Your complete Markdown formatted report here with \\n for new lines."};`;
 }
