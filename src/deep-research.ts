@@ -1,85 +1,53 @@
 import { compact } from 'lodash-es';
 import pLimit from 'p-limit';
 import { z } from 'zod';
-import {
-  trimPrompt,
-  encoder,
-  createModel,
-  deepSeekModel,
-  DEFAULT_MODEL,
-  summarizationModel,
-} from './ai/providers';
+import { trimPrompt, encoder, createModel, deepSeekModel, DEFAULT_MODEL, summarizationModel } from './ai/providers';
 import { systemPrompt } from './prompt';
 import { reportPrompt } from './report_prompt';
 import { googleService } from './api/googleService';
 import { logger } from './api/utils/logger';
 
-// New helper: Summarize long-form content into bullet points.
-async function summarizeContent(content: string, selectedModel?: string): Promise<string> {
-  const promptText = `Please summarize the following content into concise bullet points that capture the key information:\n\n${content}`;
+/**
+ * NEW: Summarize long-form content into concise bullet points.
+ */
+export async function summarizeContent(
+  content: string,
+  summarizationType: 'bullet' | 'executive' = 'bullet',
+  selectedModel?: string
+): Promise<string[]> {
+  const promptText = `Please summarize the following content into concise bullet points that capture the key insights:\n\n${content}\n\nReturn the result as a JSON object with the key "summary" containing an array of bullet points.`;
   const res = await generateObjectSanitized({
     model: selectedModel ? createModel(selectedModel) : summarizationModel,
     system: systemPrompt(),
     prompt: promptText,
     schema: z.object({
-      summary: z.string().describe('Concise summary in bullet points'),
+      summary: z.array(z.string()),
     }),
-    temperature: 0.5,
-    maxTokens: 500,
+    temperature: 0.7,
+    maxTokens: 1000,
   });
-  return res.object.summary;
+  return res.object.summary as string[];
 }
 
-// New helper: Self-review of the final report.
-async function selfReviewReport(report: string, selectedModel?: string, language?: string): Promise<{ review: string; suggestions: string }> {
-  const promptText = `Please perform a self-review of the following research report. Evaluate its coherence, completeness, and adherence to the original research requirements. List any uncertainties or potential gaps, and suggest improvements. Return your review in the following JSON format:
-{
-  "review": "Your brief evaluation of the report.",
-  "suggestions": "Any suggested improvements or actions."
-}
-
-Research Report:
-${report}`;
+/**
+ * NEW: Perform a self-review of the report to assess coherence and completeness.
+ */
+export async function selfReviewReport(
+  report: string,
+  selectedModel?: string
+): Promise<string> {
+  const promptText = `You are a research quality control assistant. Please review the following research report for coherence, completeness, adherence to the user's original query, and fulfillment of all specified requirements. Identify any uncertainties, gaps, or missing criteria. Then, provide an improved version of the report that addresses these issues. Return the final reviewed report as a JSON object with the key "reviewedReport".\n\nReport:\n${report}`;
   const res = await generateObjectSanitized({
     model: selectedModel ? createModel(selectedModel) : deepSeekModel,
     system: systemPrompt(),
     prompt: promptText,
     schema: z.object({
-      review: z.string(),
-      suggestions: z.string(),
+      reviewedReport: z.string(),
     }),
-    temperature: 0.5,
-    maxTokens: 500,
+    temperature: 0.7,
+    maxTokens: 8192,
   });
-  return res.object;
-}
-
-// New helper: Generate a checklist verifying that the final report meets user requirements.
-async function generateChecklist(query: string, report: string, selectedModel?: string, language?: string): Promise<{ checklist: Array<{ requirement: string; addressed: boolean; comment: string }> }> {
-  const promptText = `Based on the following user input, extract the key requirements, and then verify if the following research report addresses each requirement. Return a checklist in JSON format where each item includes "requirement", "addressed" (true/false), and a brief "comment" if not addressed.
-
-User Input:
-${query}
-
-Research Report:
-${report}`;
-  const res = await generateObjectSanitized({
-    model: selectedModel ? createModel(selectedModel) : deepSeekModel,
-    system: systemPrompt(),
-    prompt: promptText,
-    schema: z.object({
-      checklist: z.array(
-        z.object({
-          requirement: z.string(),
-          addressed: z.boolean(),
-          comment: z.string(),
-        }),
-      ),
-    }),
-    temperature: 0.5,
-    maxTokens: 500,
-  });
-  return res.object;
+  return res.object.reviewedReport as string;
 }
 
 function getMaxContextTokens(model?: string) {
@@ -182,9 +150,18 @@ export async function generateObjectSanitized<T>(params: any): Promise<{ object:
   }
 }
 
+interface SerpQuery {
+  query: string;
+  researchGoal: string;
+}
+
+interface SerpResponse {
+  queries: SerpQuery[];
+}
+
 /**
  * Enhanced function to generate SERP queries.
- * Begin by outlining diverse hypotheses and potential research directions, then narrow down to the final queries.
+ * Produces rigorously crafted search queries with clear, actionable research goals.
  */
 async function generateSerpQueries({
   query,
@@ -197,12 +174,11 @@ async function generateSerpQueries({
   learnings?: string[];
   selectedModel?: string;
 }) {
-  try {
-    const promptText = `Generate ${numQueries} professional, rigorously crafted, and innovative search queries to explore the following research topic. Begin by outlining diverse hypotheses and potential research directions before narrowing down to the final concise queries. Each query should be concise (5 to 10 words) yet descriptive, and must be paired with a brief, actionable research goal that leverages modern analytical frameworks and adheres to industry best practices.
-    
+  const promptText = `Begin with a broad exploratory phase: generate a wide range of innovative hypotheses and potential research directions for the topic below. Then, narrow down to ${numQueries} concise, professional, and innovative search queries that are directly aligned with the user's original intent and feedback. Each query should be 5 to 10 words and accompanied by a brief, actionable research goal.
+
 Topic: "${query}"
 ${learnings ? `Previous insights:\n${learnings.join('\n')}` : ''}
-Ensure that the queries are directly aligned with the user's original intent and any provided feedback.
+Ensure that the queries cover diverse angles and progressively narrow down the focus.
 
 Required JSON format:
 {
@@ -216,63 +192,46 @@ Required JSON format:
       "researchGoal": "a precise and innovative research direction for query 2"
     }
   ]
-}`;
-    const tokenCount = encoder.encode(promptText).length;
-    logger.debug('generateSerpQueries prompt token count', { tokenCount });
+};`;
+  const tokenCount = encoder.encode(promptText).length;
+  logger.debug('generateSerpQueries prompt token count', { tokenCount });
 
-    if (tokenCount > getMaxContextTokens(selectedModel)) {
-      logger.warn(`Prompt too long (${tokenCount} tokens), truncating learnings...`);
-      if (learnings && learnings.length > 0) {
-        const truncatedLearnings = learnings.slice(-3);
-        return generateSerpQueries({
-          query,
-          numQueries,
-          learnings: truncatedLearnings,
-          selectedModel,
-        });
-      }
-      throw new Error('Prompt too long even after truncation');
+  if (tokenCount > getMaxContextTokens(selectedModel)) {
+    logger.warn(`Prompt too long (${tokenCount} tokens), truncating learnings...`);
+    if (learnings && learnings.length > 0) {
+      const truncatedLearnings = learnings.slice(-3);
+      return generateSerpQueries({
+        query,
+        numQueries,
+        learnings: truncatedLearnings,
+        selectedModel,
+      });
     }
-
-    const res = await generateObjectSanitized({
-      model: selectedModel ? createModel(selectedModel) : deepSeekModel,
-      system: systemPrompt(),
-      prompt: promptText,
-      schema: z.object({
-        queries: z
-          .array(
-            z.object({
-              query: z.string().describe('The search query to use'),
-              researchGoal: z.string().describe('Precise and innovative research goal for this query'),
-            }),
-          )
-          .min(1)
-          .max(numQueries),
-      }),
-      temperature: 0.7,
-      maxTokens: 1000,
-    });
-
-    const serpResponse = res.object as { queries: Array<{ query: string; researchGoal: string }> };
-    logger.info(`Created ${serpResponse.queries.length} queries`, { queries: serpResponse.queries });
-    return serpResponse.queries.slice(0, numQueries);
-  } catch (error) {
-    logger.error('Error generating SERP queries', { error });
-    return [
-      {
-        query: query,
-        researchGoal: 'Explore basic concepts and current trends',
-      },
-      {
-        query: `${query} latest developments`,
-        researchGoal: 'Focus on recent innovations and updates',
-      },
-      {
-        query: `${query} detailed analysis`,
-        researchGoal: 'Deep dive into specific aspects and implications',
-      },
-    ].slice(0, numQueries);
+    throw new Error('Prompt too long even after truncation');
   }
+
+  const res = await generateObjectSanitized({
+    model: selectedModel ? createModel(selectedModel) : deepSeekModel,
+    system: systemPrompt(),
+    prompt: promptText,
+    schema: z.object({
+      queries: z
+        .array(
+          z.object({
+            query: z.string().describe('The search query to use'),
+            researchGoal: z.string().describe('Precise and innovative research goal for this query'),
+          }),
+        )
+        .min(1)
+        .max(numQueries),
+    }),
+    temperature: 0.7,
+    maxTokens: 1000,
+  });
+
+  const serpResponse = res.object as SerpResponse;
+  logger.info(`Created ${serpResponse.queries.length} queries`, { queries: serpResponse.queries });
+  return serpResponse.queries.slice(0, numQueries);
 }
 
 /**
@@ -294,37 +253,22 @@ async function processSerpResult({
   selectedModel?: string;
   includeTopUrls?: boolean;
 }) {
-  let rawContents = await googleService.scrape(result);
-
-  // Summarize each content piece if lengthy
-  const summarizedContents = await Promise.all(
-    rawContents.map(async (content) => {
-      if (content && content.length > 1000) {
-        try {
-          return await summarizeContent(content, selectedModel);
-        } catch (e) {
-          logger.warn('Summarization failed, using raw content', { error: e });
-          return content;
-        }
-      }
-      return content || '';
-    })
-  );
+  const rawContents = await googleService.scrape(result);
 
   const validIndexes: number[] = [];
-  summarizedContents.forEach((content, index) => {
-    if (content.trim() !== '') {
+  rawContents.forEach((content, index) => {
+    if (content !== null) {
       validIndexes.push(index);
     }
   });
 
   const validUrls = validIndexes.map(i => result[i]!);
 
-  logger.info(`Ran "${query}", retrieved summarized content for ${validUrls.length} URLs`);
+  logger.info(`Ran "${query}"`, { retrievedUrlsCount: validUrls.length });
 
   try {
-    let trimmedContents = summarizedContents.join('\n\n');
-    let promptText = `Conduct a rigorous and scholarly analysis of the following search results for "${query}". Generate ${numLearnings} key insights and ${numFollowUpQuestions} thought‑provoking follow‑up questions that are deeply grounded in current research trends and critical evaluation. Additionally, ensure that all insights and questions directly reflect the user's original research intent and any prior feedback.${includeTopUrls ? ' Also, identify candidate top recommendations with clear, evidence‑based justification.' : ''}
+    let trimmedContents = rawContents.map(content => content ?? '').join('\n\n');
+    let promptText = `Conduct a rigorous and scholarly analysis of the following search results for "${query}". Organize your analysis into three phases: Exploratory Phase, Deep Dive Phase, and Synthesis Phase. Generate ${numLearnings} key insights and ${numFollowUpQuestions} thought‑provoking follow‑up questions that reflect these phases, and include any uncertainties or potential gaps you identify. ${includeTopUrls ? 'Also, identify candidate top recommendations with clear, evidence‑based justification.' : ''}
 
 Search Results:
 ${trimmedContents}
@@ -344,18 +288,32 @@ Required JSON format:
   "topUrls": [
     { "url": "http://example.com", "description": "Evidence‑based justification for this recommendation" }
   ]` : ''}
-}`;
+};`;
     let tokenCount = encoder.encode(promptText).length;
     logger.debug('processSerpResult initial prompt token count', { tokenCount });
     const trimSizes = [8000, 4000, 2000, 1000, 500];
     for (const trimSize of trimSizes) {
       if (tokenCount <= getMaxContextTokens(selectedModel)) break;
-      logger.warn(`Prompt too long (${tokenCount} tokens), trimming to ${trimSize} per content...`);
-      const reTrimmed = summarizedContents.map(content => trimPrompt(content, trimSize)).join('\n\n');
-      promptText = `Conduct a rigorous and scholarly analysis of the following search results for "${query}". Generate ${numLearnings} key insights and ${numFollowUpQuestions} thought‑provoking follow‑up questions that are deeply grounded in current research trends and critical evaluation.${includeTopUrls ? ' Also, identify candidate top recommendations with clear, evidence‑based justification.' : ''}
+      logger.warn(`Prompt too long (${tokenCount} tokens), summarizing content with trim size ${trimSize}...`);
+      const summarizedContents = await Promise.all(
+        rawContents.map(async content => {
+          if (!content) return '';
+          if (content.length > trimSize) {
+            try {
+              const summaryBullets = await summarizeContent(content, 'bullet', selectedModel);
+              return summaryBullets.join(' ');
+            } catch (err) {
+              return trimPrompt(content, trimSize);
+            }
+          } else {
+            return content;
+          }
+        })
+      );
+      promptText = `Conduct a rigorous and scholarly analysis of the following search results for "${query}". Organize your analysis into three phases: Exploratory Phase, Deep Dive Phase, and Synthesis Phase. Generate ${numLearnings} key insights and ${numFollowUpQuestions} thought‑provoking follow‑up questions that reflect these phases, and include any uncertainties or potential gaps you identify. ${includeTopUrls ? 'Also, identify candidate top recommendations with clear, evidence‑based justification.' : ''}
 
 Search Results:
-${reTrimmed}
+${summarizedContents.join('\n\n')}
 
 Required JSON format:
 {
@@ -372,9 +330,9 @@ Required JSON format:
   "topUrls": [
     { "url": "http://example.com", "description": "Evidence‑based justification for this recommendation" }
   ]` : ''}
-}`;
+};`;
       tokenCount = encoder.encode(promptText).length;
-      logger.debug(`processSerpResult prompt token count after trimming to ${trimSize}`, { tokenCount });
+      logger.debug(`processSerpResult prompt token count after summarization with trim size ${trimSize}`, { tokenCount });
     }
     if (tokenCount > getMaxContextTokens(selectedModel)) {
       throw new Error(`Prompt too long (${tokenCount} tokens) even after aggressive trimming`);
@@ -422,7 +380,6 @@ Required JSON format:
 /**
  * Enhanced final report generator.
  * Composes a comprehensive, scholarly research report that is detailed and professional.
- * Now includes additional self-review and checklist phases.
  */
 export async function writeFinalReport({
   prompt,
@@ -440,7 +397,7 @@ export async function writeFinalReport({
   topUrls?: Array<{ url: string; description: string }>;
 }) {
   try {
-    let promptText = `Based on the following user input and the aggregated research learnings, compose a comprehensive, scholarly research report that meets high professional standards and reflects state‑of‑the‑art analytical methodologies. The report must directly reflect and adhere to the user's original query and the subsequent feedback provided, ensuring that every key aspect and intention is thoroughly addressed.
+    let promptText = `Based on the following user input and the aggregated research learnings, compose a comprehensive, scholarly research report that meets high professional standards and strictly adheres to the original query and all specified requirements. Ensure your report includes a dedicated "Directly Requested Findings" section that explicitly addresses the key requirements extracted from the user's input, as well as a "Criteria Checklist" that verifies each requirement has been met. Also, include a brief meta-cognitive summary of any uncertainties or potential gaps and how they were addressed.
 
 User Input (Original Query and Feedback):
 "${prompt}"
@@ -448,27 +405,23 @@ User Input (Original Query and Feedback):
 Research Learnings:
 ${learnings.map((learning, i) => `${i + 1}. ${learning}`).join('\n')}
 
-In your report, include a dedicated section titled "User Intent and Inputs" that summarizes the user's original query and feedback responses, and a section titled "Directly Requested Findings" that specifically addresses any detailed requirements mentioned by the user.
-
-Additionally, organize the report into the following hierarchical phases:
-1. **Exploratory Phase**: Outline diverse hypotheses and potential research directions.
-2. **Deep Dive Phase**: Present detailed analysis and in‑depth findings.
-3. **Synthesis Phase**: Consolidate insights into a coherent final report.
-
 Structure the report in Markdown with the following sections:
 1. **Executive Summary**: A succinct overview of the research findings.
 2. **User Intent and Inputs**: A clear restatement and analysis of the user's original query and feedback.
-3. **Directly Requested Findings**: Specific details and answers as directly requested by the user.
+3. **Directly Requested Findings**: Explicitly address the key requirements and specific details requested by the user.
 4. **Introduction**: Context, background, and the significance of the research topic.
-5. **Methodology**: A detailed description of the research approach and analytical methods.
+5. **Methodology**: A detailed explanation of the research approach and analytical techniques.
 6. **Key Insights**: In‑depth and critical findings derived from the research.
 7. **Recommendations**: Actionable strategies and directions for future research.
 8. **Conclusion**: A concise summary of the research outcomes and final reflections.
-9. **Citations**: A list of all URLs (without embedded hyperlinks) referenced in the research.
+9. **Criteria Checklist**: A list verifying that all key user requirements have been addressed.
+10. **Meta-Cognitive Summary**: A brief summary of any uncertainties or potential gaps and steps taken to resolve them.
+11. **Citations**: A list of all URLs, presented as clickable hyperlinks in Markdown format (e.g., [URL](URL)), that were referenced during the research.
+
+IMPORTANT: Do not embed any URLs within the main content; include them only in the "Citations" section.
 
 Return the final report as a valid JSON object in the following format:
-{"reportMarkdown": "Your complete Markdown formatted report here with \\n for new lines."}
-`;
+{"reportMarkdown": "Your complete Markdown formatted report here with \\n for new lines."}`;
     const tokenCount = encoder.encode(promptText).length;
     logger.debug('writeFinalReport prompt token count', { tokenCount });
     if (tokenCount > getMaxContextTokens(selectedModel)) {
@@ -494,34 +447,21 @@ Return the final report as a valid JSON object in the following format:
       temperature: 0.7,
       maxTokens: 8192,
     });
-    const safeResult = res.object as { reportMarkdown: string };
-    let reportWithNewlines = safeResult.reportMarkdown.replace(/\\n/g, '\n');
-    const topSection = topUrls && topUrls.length > 0
-      ? `\n\n## Top Recommendations\n\n${topUrls.map(item => `- <span class="break-words">${item.url}</span>: ${item.description}`).join('\n')}`
-      : '';
-    const urlsSection = `\n\n## Citations\n\n${visitedUrls.map(url => `- <span class="break-words">${url}</span>`).join('\n')}`;
-
-    // Self-review phase: assess the report for coherence and completeness.
-    let selfReviewSection = '';
-    try {
-      const review = await selfReviewReport(reportWithNewlines, selectedModel, language);
-      selfReviewSection = `\n\n## Self Review\n\n**Review:** ${review.review}\n\n**Suggestions:** ${review.suggestions}`;
-    } catch (e) {
-      logger.warn('Self review failed, proceeding without it.', { error: e });
-    }
-
-    // Checklist phase: verify that all key requirements are addressed.
-    let checklistSection = '';
-    try {
-      const checklist = await generateChecklist(prompt, reportWithNewlines, selectedModel, language);
-      const checklistItems = checklist.checklist.map(item => `- **${item.requirement}**: ${item.addressed ? 'Addressed' : 'Not Addressed'}${item.addressed ? '' : ` (${item.comment})`}`).join('\n');
-      checklistSection = `\n\n## Checklist\n\n${checklistItems}`;
-    } catch (e) {
-      logger.warn('Checklist generation failed, proceeding without it.', { error: e });
-    }
-
+    let report = res.object.reportMarkdown.replace(/\\n/g, '\n');
+    // NEW: Run self-review quality control on the report.
+    const reviewedReport = await selfReviewReport(report, selectedModel);
+    report = reviewedReport || report;
+    const topSection =
+      topUrls && topUrls.length > 0
+        ? `\n\n## Top Recommendations\n\n${topUrls
+            .map(item => `- [${item.url}](${item.url}): ${item.description}`)
+            .join('\n')}`
+        : '';
+    const urlsSection = `\n\n## Citations\n\n${visitedUrls
+      .map(url => `- [${url}](${url})`)
+      .join('\n')}`;
     logger.info('Final report generated');
-    return reportWithNewlines + topSection + urlsSection + selfReviewSection + checklistSection;
+    return report + topSection + urlsSection;
   } catch (error) {
     logger.error('Error generating final report', { error });
     const fallbackReport = `# Research Report
@@ -533,13 +473,9 @@ ${prompt}
 ${learnings.map((learning, i) => `${i + 1}. ${learning}`).join('\n')}
 
 ## Citations
-${visitedUrls.map(url => `- ${url}`).join('\n')}`;
+${visitedUrls.map(url => `- [${url}](${url})`).join('\n')}`;
     return fallbackReport;
   }
-}
-
-interface SerpCandidates {
-  finalTopUrls: Array<{ url: string; description: string }>;
 }
 
 /**
@@ -617,8 +553,8 @@ export async function deepResearch({
       requestLimit(async () => {
         try {
           progressCallback && progressCallback(`Searching for "${serpQuery.query}"...`);
-          // Use timeframe "week" by default to prioritize recent results
-          const urls = await googleService.googleSearch(serpQuery.query, 10, sites, "week");
+          // Now pass the timeframe param to prioritize recent results intelligently.
+          const urls = await googleService.googleSearch(serpQuery.query, 10, sites);
           progressCallback && progressCallback(`Found ${urls.length} results for "${serpQuery.query}". Processing...`);
           logger.info('Processing SERP result', { query: serpQuery.query, urlsCount: urls.length });
           // Determine whether to include top URLs based on the query content
