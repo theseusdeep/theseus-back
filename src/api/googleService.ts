@@ -28,8 +28,10 @@ export class GoogleService {
       return [];
     }
 
-    // Use default timeframe of 'week'
-    const defaultTimeframe = 'week';
+    // Decide on a default timeframe based on the query content.
+    // If the query mentions "latest", "new", or "recent", use the last 24h; otherwise default to "week".
+    let defaultTimeframe = /latest|new|recent/i.test(query) ? '24h' : 'week';
+
     let searchUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}&timeframe=${defaultTimeframe}`;
 
     if (sites && sites.length > 0) {
@@ -54,31 +56,8 @@ export class GoogleService {
       }
 
       const json = await response.json();
-      let results: string[] = Array.isArray(json.results) ? json.results : [];
+      const results: string[] = Array.isArray(json.results) ? json.results : [];
       logger.info('External search API succeeded', { resultsCount: results.length });
-
-      // If results are too few, retry without timeframe filter
-      if (results.length < 3) {
-        let fallbackUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}`;
-        if (sites && sites.length > 0) {
-          for (const site of sites) {
-            fallbackUrl += `&sites=${encodeURIComponent(site)}`;
-          }
-        }
-        logger.warn('Too few results returned with timeframe filter, retrying without timeframe filter');
-        const fallbackResponse = await fetch(fallbackUrl, {
-          headers: {
-            'x-api-key': EXTERNAL_API_KEY,
-          },
-        });
-        if (fallbackResponse.ok) {
-          const fallbackJson = await fallbackResponse.json();
-          const fallbackResults: string[] = Array.isArray(fallbackJson.results) ? fallbackJson.results : [];
-          // Merge results and remove duplicates
-          results = Array.from(new Set([...results, ...fallbackResults]));
-        }
-      }
-
       return results.slice(0, maxResults);
     } catch (e: any) {
       logger.error('Error calling external search API', {
