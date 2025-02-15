@@ -322,6 +322,7 @@ Required JSON format:
     };
     return {
       learnings: safeResult.learnings,
+      followUpQuestions: safeResult.followUpQuestions,
       visitedUrls: validUrls,
       topUrls: safeResult.topUrls || [],
     };
@@ -597,4 +598,3 @@ export async function deepResearch({
   });
   return finalResult;
 }
-
