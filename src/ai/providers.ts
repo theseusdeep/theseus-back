@@ -8,6 +8,9 @@ import { logger, addTokenUsage } from '../api/utils/logger';
 const BASE_URL = 'https://api.venice.ai/api/v1';
 const VENICE_API_KEY = process.env.VENICE_API_KEY!;
 
+// Use CONTEXT_SIZE env var if provided, else default to 120000 tokens.
+const DEFAULT_CONTEXT_SIZE = process.env.CONTEXT_SIZE ? parseInt(process.env.CONTEXT_SIZE) : 120000;
+
 /**
  * Custom VeniceAI function to call Venice chat completions.
  * It returns an async function that accepts parameters and always sends a request body
@@ -129,13 +132,19 @@ export const o3MiniModel = VeniceAI('o3-mini', {
   structuredOutputs: true,
 });
 
+// NEW: Summarization model using the new environment variable.
+export const VENICE_SUMMARIZATION_MODEL = process.env.VENICE_SUMMARIZATION_MODEL || 'default-summarization-model';
+export const summarizationModel = VeniceAI(VENICE_SUMMARIZATION_MODEL, {
+  structuredOutputs: true,
+});
+
 const MinChunkSize = 140;
 export const encoder = getEncoding('o200k_base');
 
 /**
  * Trim prompt to maximum context size.
  */
-export function trimPrompt(prompt: string, contextSize = 120_000) {
+export function trimPrompt(prompt: string, contextSize = DEFAULT_CONTEXT_SIZE) {
   if (!prompt) {
     return '';
   }
