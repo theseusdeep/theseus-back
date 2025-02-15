@@ -133,7 +133,25 @@ async function generateSerpQueries({
   selectedModel?: string;
 }) {
   try {
-    const promptText = Generate ${numQueries} professional, rigorously crafted, and innovative search queries to explore the following research topic. Each query should be concise (5 to 10 words) yet descriptive, and must be paired with a brief, actionable research goal that leverages modern analytical frameworks and adheres to industry best practices.
+    const promptText = `Generate ${numQueries} professional, rigorously crafted, and innovative search queries to explore the following research topic. Each query should be concise (5 to 10 words) yet descriptive, and must be paired with a brief, actionable research goal that leverages modern analytical frameworks and adheres to industry best practices.
+    
+    Topic: "${query}"
+    ${learnings ? `Previous insights:\n${learnings.join('\n')}` : ''}
+    Ensure that the queries are directly aligned with the user's original intent and any provided feedback.
+    
+    Required JSON format:
+    {
+      "queries": [
+        {
+          "query": "example search query 1",
+          "researchGoal": "a precise and innovative research direction for query 1"
+        },
+        {
+          "query": "example search query 2",
+          "researchGoal": "a precise and innovative research direction for query 2"
+        }
+      ]
+    };`;
     
 Topic: "${query}"
 ${learnings ? Previous insights:\n${learnings.join('\n')} : ''}
