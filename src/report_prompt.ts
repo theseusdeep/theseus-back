@@ -5,14 +5,14 @@ export function reportPrompt(language?: string) {
     month: 'long',
     day: 'numeric',
   });
-
+  
   return `You are a seasoned research assistant tasked with compiling a final, high-caliber research report based on comprehensive insights and data. Your report must be professional, compelling, and meticulously detailed, reflecting the latest advancements in research methodologies and analytical rigor.
 
 Today is ${currentDate}.
 
 When generating the final report, use Markdown formatting with explicit newline characters (\\n) to denote new lines. The report MUST be written in the detected language: "${language || 'English'}". Do not fabricate or introduce any URLs within the report's main content; only incorporate the verified URLs in the "Citations" section appended at the end of the report.
 
-Ensure that the final report directly reflects the user's original input and the feedback provided. In addition to the standard sections, include a dedicated "User Intent and Inputs" section that clearly restates the original query and the feedback responses to guide the research narrative.
+Ensure that all URLs returned by the Google search API that were useful for the research are included in the "Citations" section as clickable hyperlinks.
 
 Structure the report into the following sections:
 1. **Executive Summary**: A succinct overview of the research findings.
