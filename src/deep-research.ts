@@ -20,18 +20,12 @@ function getMaxContextTokens(model?: string) {
 
 function getMaxConcurrency(modelId: string): number {
   const modelIdLower = modelId.toLowerCase();
-
-  // Large models (70B+)
   if (modelIdLower.match(/(70b|72b|claude-3|deepseek-r1)/)) {
     return 1;
   }
-
-  // Medium models (32-34B)
   if (modelIdLower.match(/(32b|34b)/)) {
     return 1;
   }
-
-  // Small models (≤15B)
   return 4;
 }
 
@@ -41,10 +35,6 @@ export interface ResearchResult {
   topUrls: Array<{ url: string; description: string }>;
 }
 
-/**
- * Remove any <think>...</think> blocks. If a "{" exists, return the substring
- * from the first "{" to the last "}".
- */
 export function sanitizeDeepSeekOutput(raw: string): string {
   const withoutThink = raw.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
   const firstBrace = withoutThink.indexOf('{');
@@ -58,10 +48,6 @@ export function sanitizeDeepSeekOutput(raw: string): string {
   return withoutThink.slice(firstBrace, lastBrace + 1).trim();
 }
 
-/**
- * Calls the model ensuring the Venice parameter is always included.
- * Logs the prompts and sanitizes the response.
- */
 export async function generateObjectSanitized<T>(params: any): Promise<{ object: T }> {
   let res;
   logger.debug('generateObjectSanitized called', {
@@ -69,12 +55,8 @@ export async function generateObjectSanitized<T>(params: any): Promise<{ object:
     system: params.system,
     prompt: params.prompt,
   });
-
-  // Always force include_venice_system_prompt to false.
   params.venice_parameters = { include_venice_system_prompt: false };
-
   res = await params.model(params);
-
   if (params.model.modelId === DEFAULT_MODEL) {
     logger.info('Received response from Venice API', { response: res });
     const rawText = res.choices && res.choices[0]?.message?.content;
@@ -97,7 +79,6 @@ export async function generateObjectSanitized<T>(params: any): Promise<{ object:
         sanitizedSnippet: sanitized.substring(0, 200),
         sanitizedLength: sanitized.length,
       });
-      // Attempt to repair the sanitized JSON by trimming to the last closing brace.
       const lastIndex = sanitized.lastIndexOf('}');
       if (lastIndex !== -1) {
         const repaired = sanitized.substring(0, lastIndex + 1);
@@ -129,9 +110,6 @@ interface SerpResponse {
   queries: SerpQuery[];
 }
 
-/**
- * Generates SERP queries based on the research topic and optional previous insights.
- */
 async function generateSerpQueries({
   query,
   numQueries = 3,
@@ -144,7 +122,6 @@ async function generateSerpQueries({
   selectedModel?: string;
 }) {
   try {
-    // Updated prompt: ensure queries are of optimal length (approximately 8-12 words)
     const promptText = `Generate ${numQueries} professional, rigorously crafted, and innovative search queries to explore the following research topic. Each query should be descriptive and of optimal length (approximately 8-12 words) and must be paired with a brief, actionable research goal that leverages modern analytical frameworks and adheres to industry best practices.
     
 Topic: "${query}"
@@ -166,7 +143,6 @@ Required JSON format:
 };`;
     const tokenCount = encoder.encode(promptText).length;
     logger.debug('generateSerpQueries prompt token count', { tokenCount });
-
     if (tokenCount > getMaxContextTokens(selectedModel)) {
       logger.warn(`Prompt too long (${tokenCount} tokens), truncating learnings...`);
       if (learnings && learnings.length > 0) {
@@ -180,7 +156,6 @@ Required JSON format:
       }
       throw new Error('Prompt too long even after truncation');
     }
-
     const res = await generateObjectSanitized({
       model: selectedModel ? createModel(selectedModel) : deepSeekModel,
       system: systemPrompt(),
@@ -199,7 +174,6 @@ Required JSON format:
       temperature: 0.6,
       maxTokens: 1000,
     });
-
     const serpResponse = res.object as SerpResponse;
     logger.info(`Created ${serpResponse.queries.length} queries`, { queries: serpResponse.queries });
     return serpResponse.queries.slice(0, numQueries);
@@ -222,9 +196,6 @@ Required JSON format:
   }
 }
 
-/**
- * Processes SERP results to extract key insights and follow‑up questions.
- */
 async function processSerpResult({
   query,
   result,
@@ -240,21 +211,21 @@ async function processSerpResult({
   selectedModel?: string;
   includeTopUrls?: boolean;
 }) {
-  // Call scrape with the search query so that the API can determine if each result is related.
   const scrapedResults = await googleService.scrape(result, query);
-  // Filter to keep only the URLs that returned a summary and are query related.
   const validResults = scrapedResults.filter(item => item.summary && item.isQueryRelated);
   const validContents = validResults.map(item => item.summary);
   const validUrls = validResults.map(item => item.url);
 
   logger.info(`Ran "${query}", retrieved content for ${validUrls.length} URLs`);
+  logger.debug('Valid URLs from scrape', { validUrls });
+
   try {
     let trimmedContents = validContents.join('\n\n');
     let promptText = `Conduct a rigorous and scholarly analysis of the following search results for "${query}". Generate ${numLearnings} key insights and ${numFollowUpQuestions} thought‑provoking follow‑up questions that are deeply grounded in current research trends and critical evaluation.${includeTopUrls ? ' Also, identify candidate top recommendations with clear, evidence‑based justification.' : ''}
-    
+
 Search Results:
 ${trimmedContents}
-    
+
 Required JSON format:
 {
   "learnings": [
@@ -279,10 +250,10 @@ Required JSON format:
       logger.warn(`Prompt too long (${tokenCount} tokens), trimming to ${trimSize} per content...`);
       const reTrimmed = validContents.map((content) => trimPrompt(content ?? '', trimSize)).join('\n\n');
       promptText = `Conduct a rigorous and scholarly analysis of the following search results for "${query}". Generate ${numLearnings} key insights and ${numFollowUpQuestions} thought‑provoking follow‑up questions that are deeply grounded in current research trends and critical evaluation.${includeTopUrls ? ' Also, identify candidate top recommendations with clear, evidence‑based justification.' : ''}
-    
+
 Search Results:
 ${reTrimmed}
-    
+
 Required JSON format:
 {
   "learnings": [
@@ -345,9 +316,6 @@ Required JSON format:
   }
 }
 
-/**
- * Generates an executive summary from provided content using the new summarization model.
- */
 export async function generateSummary(content: string, selectedModel?: string): Promise<string> {
   if (!content.trim()) {
     logger.warn('generateSummary called with empty content, returning empty summary');
@@ -372,11 +340,6 @@ export async function generateSummary(content: string, selectedModel?: string): 
   }
 }
 
-/**
- * Generates the final report.
- * This function only supplies the LLM with the user input, research learnings, and verified URLs.
- * The structure of the report is determined solely by the system prompt from src/report_prompt.ts.
- */
 export async function writeFinalReport({
   prompt,
   learnings,
@@ -393,17 +356,16 @@ export async function writeFinalReport({
   topUrls?: Array<{ url: string; description: string }>;
 }) {
   try {
-    // First, generate an executive summary from the learnings.
     const combinedLearnings = learnings.join('\n');
     const executiveSummary = await generateSummary(combinedLearnings, selectedModel);
-
     const promptText = `Executive Summary:
 ${executiveSummary}
 
 User Input: "${prompt}"
 Research Learnings:
 ${learnings.join('\n')}
-\nVerified URLs:
+
+## Citations:
 ${visitedUrls.join('\n')}`;
     
     const res = await generateObjectSanitized({
@@ -420,7 +382,7 @@ ${visitedUrls.join('\n')}`;
     return safeResult.reportMarkdown.replace(/\\n/g, '\n');
   } catch (error) {
     logger.error('Error generating final report', { error });
-    return `# Research Report\n\nUser Input: ${prompt}\n\nKey Learnings:\n${learnings.join('\n')}\n\nVerified URLs:\n${visitedUrls.join('\n')}`;
+    return `# Research Report\n\nUser Input: ${prompt}\n\nKey Learnings:\n${learnings.join('\n')}\n\nCitations:\n${visitedUrls.join('\n')}`;
   }
 }
 
@@ -428,9 +390,6 @@ interface SerpCandidates {
   finalTopUrls: Array<{ url: string; description: string }>;
 }
 
-/**
- * Finalizes candidate top recommendations.
- */
 async function finalizeTopRecommendations(
   candidates: Array<{ url: string; description: string }>,
   count: number,
@@ -455,10 +414,6 @@ Return the result as a JSON object with a key "finalTopUrls" that is an array of
   return res.object.finalTopUrls;
 }
 
-/**
- * Performs deep research with optional progress updates, supports continuation research,
- * and can be aborted via the provided abortSignal.
- */
 export async function deepResearch({
   query,
   breadth,
@@ -598,3 +553,5 @@ export async function deepResearch({
   });
   return finalResult;
 }
+
+import { reportPrompt as reportPromptModule } from './report_prompt';
