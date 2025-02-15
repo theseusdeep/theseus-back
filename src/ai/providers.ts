@@ -51,10 +51,10 @@ function VeniceAI(model: string, options: any = {}) {
     };
 
     logger.debug('Calling VeniceAI API', { model, body });
-    const response = await fetch(`${BASE_URL}/chat/completions`, {
+    const response = await fetch(${BASE_URL}/chat/completions, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${VENICE_API_KEY}`,
+        Authorization: Bearer ${VENICE_API_KEY},
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(body)
@@ -125,10 +125,6 @@ export const gpt4MiniModel = VeniceAI('gpt-4o-mini', {
 });
 export const o3MiniModel = VeniceAI('o3-mini', {
   reasoningEffort: 'medium',
-  structuredOutputs: true,
-});
-// New summarization model for dynamic content summarization
-export const summarizationModel = VeniceAI(process.env.VENICE_SUMMARIZATION_MODEL || DEFAULT_MODEL, {
   structuredOutputs: true,
 });
 
