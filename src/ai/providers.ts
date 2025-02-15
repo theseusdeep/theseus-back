@@ -127,9 +127,8 @@ export const o3MiniModel = VeniceAI('o3-mini', {
   reasoningEffort: 'medium',
   structuredOutputs: true,
 });
-
-// New Summarization Model for dynamic content summarization
-export const summarizationModel = VeniceAI(process.env.VENICE_SUMMARIZATION_MODEL || 'summarization-default-model', {
+// NEW: Summarization model used to generate executive summaries and bullet‐point distillations.
+export const veniceSummarizationModel = VeniceAI(process.env.VENICE_SUMMARIZATION_MODEL || 'venice-summarization-default', {
   structuredOutputs: true,
 });
 
