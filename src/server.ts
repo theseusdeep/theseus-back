@@ -4,10 +4,10 @@ dotenv.config({ override: true });
 import express, { Request, Response, NextFunction } from 'express';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
-import { deepResearch, writeFinalReport, qualityControlReview } from './deep-research';
+import { deepResearch, writeFinalReport } from './deep-research';
 import { generateFeedback } from './feedback';
 import { fetchModels } from './ai/providers';
-import { logger } from './api/utils/logger';
+import { logger, finalizeLogs } from './api/utils/logger';
 import { 
   getUserByUsername, 
   updateUserTokens, 
@@ -20,6 +20,9 @@ import {
 } from './db';
 import bcrypt from 'bcrypt';
 
+// Global map to track ongoing research for abort support (Task 7)
+const ongoingResearch = new Map<string, AbortController>();
+
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
   return Promise.race([
     promise,
@@ -29,12 +32,12 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
 
 const app = express();
 
+// Updated middleware: skip logging preflight OPTIONS requests (Task 3)
 app.use((req: Request, res: Response, next: NextFunction): void => {
   if (req.method === 'OPTIONS') {
-    logger.info("Received preflight OPTIONS request", { url: req.url, headers: req.headers });
-  } else {
-    logger.info("Incoming request", { method: req.method, url: req.url });
+    return next();
   }
+  logger.info("Incoming request", { method: req.method, url: req.url });
   next();
 });
 
@@ -144,6 +147,10 @@ app.post('/api/research', asyncHandler(async (req: Request, res: Response) => {
   logger.info('Research request received', { researchId, query, breadth, depth, selectedModel, concurrency, sites });
   res.json({ researchId });
 
+  // Create an AbortController for this research task (Task 7)
+  const abortController = new AbortController();
+  ongoingResearch.set(researchId, abortController);
+
   (async () => {
     const startPrompt = logger.getTotalPromptTokens();
     const startCompletion = logger.getTotalCompletionTokens();
@@ -166,6 +173,7 @@ app.post('/api/research', asyncHandler(async (req: Request, res: Response) => {
         concurrency,
         progressCallback,
         sites,
+        abortSignal: abortController.signal,
       });
       const researchTimeoutMs = 15 * 60 * 1000; // 15 minutes
       const fallbackResult = { 
@@ -185,13 +193,10 @@ app.post('/api/research', asyncHandler(async (req: Request, res: Response) => {
       });
       const reportTimeoutMs = 5 * 60 * 1000; // 5 minutes
       const fallbackReport = `# Research Report\n\nFallback report generated due to timeout. Learnings: ${learnings.join(', ')}`;
-      const rawReport = await withTimeout(reportPromise, reportTimeoutMs, fallbackReport);
+      const report = await withTimeout(reportPromise, reportTimeoutMs, fallbackReport);
 
-      // Quality Control Self-Review Step
-      const finalReport = await qualityControlReview(rawReport, selectedModel, language);
-
-      updateResearchProgress(researchId, `REPORT:${finalReport}`);
-      setResearchFinalReport(researchId, finalReport);
+      updateResearchProgress(researchId, `REPORT:${report}`);
+      setResearchFinalReport(researchId, report);
 
       logger.info('Research completed successfully', { researchId });
       const endPrompt = logger.getTotalPromptTokens();
@@ -205,6 +210,9 @@ app.post('/api/research', asyncHandler(async (req: Request, res: Response) => {
       updateResearchProgress(researchId, `ERROR:Research failed - ${errorMessage}`);
       setResearchFinalReport(researchId, `ERROR:Research failed - ${errorMessage}`);
       logger.error('Research failed', { researchId, error });
+    } finally {
+      // Remove from ongoing research once complete or errored.
+      ongoingResearch.delete(researchId);
     }
   })();
 }));
@@ -227,6 +235,27 @@ app.get('/api/research/history', asyncHandler(async (req: Request, res: Response
   const user = (req as any).user;
   const history = await getResearchHistory(user.username);
   res.json(history);
+}));
+
+// New endpoint to abort research (Task 7)
+app.post('/api/research/abort', asyncHandler(async (req: Request, res: Response) => {
+  const { researchId } = req.body;
+  if (!researchId || typeof researchId !== 'string') {
+    res.status(400).json({ error: 'Missing or invalid researchId' });
+    return;
+  }
+  const controller = ongoingResearch.get(researchId);
+  if (controller) {
+    controller.abort();
+    ongoingResearch.delete(researchId);
+    // Optionally update research record to indicate it was aborted.
+    updateResearchProgress(researchId, 'Research aborted by user.');
+    setResearchFinalReport(researchId, 'Research aborted by user.');
+    logger.info('Research aborted', { researchId });
+    res.json({ success: true });
+  } else {
+    res.status(404).json({ error: 'Research task not found or already completed' });
+  }
 }));
 
 app.post('/api/feedback', asyncHandler(async (req: Request, res: Response) => {
