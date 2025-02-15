@@ -1,4 +1,4 @@
-import { logger } from './utils/logger';
+import { logger } from '../api/utils/logger';
 
 const EXTERNAL_API_KEY = process.env.SEARCH_API_KEY || '';
 
@@ -19,10 +19,15 @@ export class GoogleService {
    * @param query The search query
    * @param maxResults Maximum number of results to retrieve
    * @param sites Optional array of website URLs to restrict the search.
-   * @param timeframe Optional relative time filter for search results (e.g., "24h", "week", "month", "year").
+   * @param timeframe Relative time filter for search results. Allowed values: "24h", "week", "month", "year".
    * @returns An array of result URLs
    */
-  public async googleSearch(query: string, maxResults: number, sites?: string[], timeframe?: string): Promise<string[]> {
+  public async googleSearch(
+    query: string,
+    maxResults: number,
+    sites?: string[],
+    timeframe: string = 'month'
+  ): Promise<string[]> {
     logger.debug('GoogleService: googleSearch called', { query, maxResults, sites, timeframe });
     if (!EXTERNAL_API_KEY) {
       logger.error('Missing SEARCH_API_KEY environment variable');
@@ -31,18 +36,12 @@ export class GoogleService {
 
     let searchUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(
       query,
-    )}&max_results=${maxResults}`;
+    )}&max_results=${maxResults}&timeframe=${encodeURIComponent(timeframe)}`;
 
     if (sites && sites.length > 0) {
       for (const site of sites) {
         searchUrl += `&sites=${encodeURIComponent(site)}`;
       }
-    }
-
-    // Validate and add timeframe if provided and allowed
-    const allowedTimeframes = new Set(["24h", "week", "month", "year"]);
-    if (timeframe && allowedTimeframes.has(timeframe)) {
-      searchUrl += `&timeframe=${encodeURIComponent(timeframe)}`;
     }
 
     try {
@@ -61,32 +60,15 @@ export class GoogleService {
       }
 
       const json = await response.json();
-      let results: string[] = Array.isArray(json.results) ? json.results : [];
-      logger.info('External search API succeeded', { resultsCount: results.length });
-
-      // If timeframe was used and insufficient results obtained, try fallback without timeframe
-      if (timeframe && results.length < 3) {
-        logger.warn('Insufficient results with timeframe filter, retrying without timeframe.');
-        let fallbackUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}`;
-        if (sites && sites.length > 0) {
-          for (const site of sites) {
-            fallbackUrl += `&sites=${encodeURIComponent(site)}`;
-          }
-        }
-        const fallbackResponse = await fetch(fallbackUrl, {
-          headers: {
-            'x-api-key': EXTERNAL_API_KEY,
-          },
-        });
-        if (fallbackResponse.ok) {
-          const fallbackJson = await fallbackResponse.json();
-          const fallbackResults: string[] = Array.isArray(fallbackJson.results) ? fallbackJson.results : [];
-          // Merge results uniquely
-          results = Array.from(new Set([...results, ...fallbackResults]));
-          logger.info('Fallback search succeeded', { fallbackResultsCount: fallbackResults.length, totalResults: results.length });
-        }
+      const results: string[] = Array.isArray(json.results) ? json.results : [];
+      logger.info('External search API succeeded', { resultsCount: results.length, timeframe });
+      // If too few results and timeframe was strict, retry with a broader timeframe.
+      if (results.length < 3 && timeframe !== 'year') {
+        logger.info('Insufficient results with timeframe', { timeframe, resultsCount: results.length, retryingWith: 'year' });
+        const fallbackResults = await this.googleSearch(query, maxResults, sites, 'year');
+        const mergedResults = Array.from(new Set([...results, ...fallbackResults]));
+        return mergedResults.slice(0, maxResults);
       }
-
       return results.slice(0, maxResults);
     } catch (e: any) {
       logger.error('Error calling external search API', {
