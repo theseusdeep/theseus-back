@@ -97,6 +97,22 @@ export async function generateObjectSanitized<T>(params: any): Promise<{ object:
         sanitizedSnippet: sanitized.substring(0, 200),
         sanitizedLength: sanitized.length,
       });
+      // Attempt to repair the sanitized JSON by trimming to the last closing brace.
+      const lastIndex = sanitized.lastIndexOf('}');
+      if (lastIndex !== -1) {
+        const repaired = sanitized.substring(0, lastIndex + 1);
+        try {
+          const parsed = JSON.parse(repaired);
+          logger.debug('Parsed repaired sanitized output', { parsed });
+          return { object: parsed };
+        } catch (repairError: any) {
+          logger.error('Error parsing repaired sanitized output', {
+            error: repairError.message,
+            repairedSnippet: repaired.substring(0, 200),
+            repairedLength: repaired.length,
+          });
+        }
+      }
       throw error;
     }
   } else {
@@ -338,6 +354,10 @@ Required JSON format:
  * Generates an executive summary from provided content using the new summarization model.
  */
 export async function generateSummary(content: string, selectedModel?: string): Promise<string> {
+  if (!content.trim()) {
+    logger.warn('generateSummary called with empty content, returning empty summary');
+    return '';
+  }
   try {
     const promptText = `Summarize the following content into a concise executive summary in bullet points:\n\n${content}\n\nExecutive Summary:`;
     const res = await generateObjectSanitized({
