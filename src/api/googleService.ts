@@ -28,9 +28,9 @@ export class GoogleService {
       return [];
     }
 
-    // Default to a recent timeframe, but broaden if results are too few.
-    let timeframe = 'week';
-    let searchUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}&timeframe=${timeframe}`;
+    // Use default timeframe of 'week'
+    const defaultTimeframe = 'week';
+    let searchUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}&timeframe=${defaultTimeframe}`;
 
     if (sites && sites.length > 0) {
       for (const site of sites) {
@@ -55,29 +55,30 @@ export class GoogleService {
 
       const json = await response.json();
       let results: string[] = Array.isArray(json.results) ? json.results : [];
+      logger.info('External search API succeeded', { resultsCount: results.length });
 
-      // If results are too few, broaden timeframe to "month" and combine.
-      if (results.length < Math.min(maxResults, 3)) {
-        timeframe = 'month';
-        let broaderUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}&timeframe=${timeframe}`;
+      // If results are too few, retry without timeframe filter
+      if (results.length < 3) {
+        let fallbackUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}`;
         if (sites && sites.length > 0) {
           for (const site of sites) {
-            broaderUrl += `&sites=${encodeURIComponent(site)}`;
+            fallbackUrl += `&sites=${encodeURIComponent(site)}`;
           }
         }
-        const broaderResponse = await fetch(broaderUrl, {
+        logger.warn('Too few results returned with timeframe filter, retrying without timeframe filter');
+        const fallbackResponse = await fetch(fallbackUrl, {
           headers: {
             'x-api-key': EXTERNAL_API_KEY,
           },
         });
-        if (broaderResponse.ok) {
-          const broaderJson = await broaderResponse.json();
-          const broaderResults: string[] = Array.isArray(broaderJson.results) ? broaderJson.results : [];
-          results = Array.from(new Set([...results, ...broaderResults]));
+        if (fallbackResponse.ok) {
+          const fallbackJson = await fallbackResponse.json();
+          const fallbackResults: string[] = Array.isArray(fallbackJson.results) ? fallbackJson.results : [];
+          // Merge results and remove duplicates
+          results = Array.from(new Set([...results, ...fallbackResults]));
         }
       }
 
-      logger.info('External search API succeeded', { resultsCount: results.length });
       return results.slice(0, maxResults);
     } catch (e: any) {
       logger.error('Error calling external search API', {
