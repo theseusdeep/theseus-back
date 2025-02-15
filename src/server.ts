@@ -4,7 +4,7 @@ dotenv.config({ override: true });
 import express, { Request, Response, NextFunction } from 'express';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
-import { deepResearch, writeFinalReport } from './deep-research';
+import { deepResearch, writeFinalReport, qualityControlReview } from './deep-research';
 import { generateFeedback } from './feedback';
 import { fetchModels } from './ai/providers';
 import { logger } from './api/utils/logger';
@@ -185,10 +185,13 @@ app.post('/api/research', asyncHandler(async (req: Request, res: Response) => {
       });
       const reportTimeoutMs = 5 * 60 * 1000; // 5 minutes
       const fallbackReport = `# Research Report\n\nFallback report generated due to timeout. Learnings: ${learnings.join(', ')}`;
-      const report = await withTimeout(reportPromise, reportTimeoutMs, fallbackReport);
+      const rawReport = await withTimeout(reportPromise, reportTimeoutMs, fallbackReport);
 
-      updateResearchProgress(researchId, `REPORT:${report}`);
-      setResearchFinalReport(researchId, report);
+      // Quality Control Self-Review Step
+      const finalReport = await qualityControlReview(rawReport, selectedModel, language);
+
+      updateResearchProgress(researchId, `REPORT:${finalReport}`);
+      setResearchFinalReport(researchId, finalReport);
 
       logger.info('Research completed successfully', { researchId });
       const endPrompt = logger.getTotalPromptTokens();
