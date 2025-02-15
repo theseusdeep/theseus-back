@@ -28,12 +28,13 @@ export class GoogleService {
       return [];
     }
 
-    // Decide on a default timeframe based on the query content.
-    // If the query mentions "latest", "new", or "recent", use the last 24h; otherwise default to "week".
-    let defaultTimeframe = /latest|new|recent/i.test(query) ? '24h' : 'week';
+    // Determine timeframe heuristically based on query keywords.
+    let timeframe = "week"; // default timeframe
+    if (/latest|new|current/i.test(query)) {
+      timeframe = "24h";
+    }
 
-    let searchUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}&timeframe=${defaultTimeframe}`;
-
+    let searchUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}&timeframe=${timeframe}`;
     if (sites && sites.length > 0) {
       for (const site of sites) {
         searchUrl += `&sites=${encodeURIComponent(site)}`;
@@ -58,6 +59,32 @@ export class GoogleService {
       const json = await response.json();
       const results: string[] = Array.isArray(json.results) ? json.results : [];
       logger.info('External search API succeeded', { resultsCount: results.length });
+
+      // If very few results, try a fallback with a less restrictive timeframe.
+      if (results.length < 3) {
+        logger.info('Few results obtained, retrying with less restrictive timeframe', { currentTimeframe: timeframe });
+        const fallbackTimeframe = "month";
+        let fallbackUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}&timeframe=${fallbackTimeframe}`;
+        if (sites && sites.length > 0) {
+          for (const site of sites) {
+            fallbackUrl += `&sites=${encodeURIComponent(site)}`;
+          }
+        }
+        const fallbackResponse = await fetch(fallbackUrl, {
+          headers: {
+            'x-api-key': EXTERNAL_API_KEY,
+          },
+        });
+        if (fallbackResponse.ok) {
+          const fallbackJson = await fallbackResponse.json();
+          const fallbackResults: string[] = Array.isArray(fallbackJson.results) ? fallbackJson.results : [];
+          // Merge and deduplicate results.
+          const mergedResults = Array.from(new Set([...results, ...fallbackResults]));
+          logger.info('Merged fallback results', { mergedCount: mergedResults.length });
+          return mergedResults.slice(0, maxResults);
+        }
+      }
+
       return results.slice(0, maxResults);
     } catch (e: any) {
       logger.error('Error calling external search API', {
@@ -169,5 +196,3 @@ export class GoogleService {
     }
   }
 }
-
-export const googleService = new GoogleService();
