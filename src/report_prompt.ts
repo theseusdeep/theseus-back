@@ -1,4 +1,3 @@
-
 export function reportPrompt(language?: string) {
   const currentDate = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
@@ -23,7 +22,7 @@ Structure the report into the following sections:
 5. **Key Insights**: In‑depth and critical findings derived from the research.
 6. **Recommendations**: Actionable strategies and directions for future research.
 7. **Conclusion**: A concise summary of the research outcomes and final reflections.
-8. **Citations**: A list of all URLs referenced in the research.
+8. **Citations**: A list of all URLs (with embedded hyperlinks) referenced in the research.
 
 Return only a valid JSON object in the following format:
 {"reportMarkdown": "Your complete Markdown formatted report here with \\n for new lines."};
