@@ -3,7 +3,7 @@ import { logger } from './utils/logger';
 const EXTERNAL_API_KEY = process.env.SEARCH_API_KEY || '';
 
 /**
- * Outsourced service to retrieve search results and scrape their contents
+ * Outsourced service to retrieve Google search results and scrape their contents
  * from an external API (https://google-twitter-scraper.vercel.app).
  */
 export class GoogleService {
@@ -142,15 +142,18 @@ export class GoogleService {
 
   /**
    * Use the external API to scrape the content from a list of URLs.
+   * Now includes the search query in the request body.
+   * Returns an array of objects with properties: url, summary, and isQueryRelated.
    * If a bulk call returns a 504 (Gateway Timeout), fall back to individual calls.
    * @param urls An array of URLs to scrape
-   * @returns An array of strings or null values, parallel to the input URLs
+   * @param query The search query used for filtering relevance
+   * @returns An array of objects containing scraped summary and relatedness flag for each URL.
    */
-  public async scrape(urls: string[]): Promise<(string | null)[]> {
-    logger.debug('GoogleService: scrape called', { urlsCount: urls.length });
+  public async scrape(urls: string[], query: string): Promise<Array<{ url: string, summary: string | null, isQueryRelated: boolean }>> {
+    logger.debug('GoogleService: scrape called', { urlsCount: urls.length, query });
     if (!EXTERNAL_API_KEY) {
       logger.error('Missing SEARCH_API_KEY environment variable');
-      return urls.map(() => null);
+      return urls.map(url => ({ url, summary: null, isQueryRelated: false }));
     }
 
     if (urls.length === 0) {
@@ -165,7 +168,7 @@ export class GoogleService {
           'Content-Type': 'application/json',
           'x-api-key': EXTERNAL_API_KEY,
         },
-        body: JSON.stringify({ urls }),
+        body: JSON.stringify({ urls, query }),
       });
 
       if (!response.ok) {
@@ -180,7 +183,7 @@ export class GoogleService {
                     'Content-Type': 'application/json',
                     'x-api-key': EXTERNAL_API_KEY,
                   },
-                  body: JSON.stringify({ urls: [url] }),
+                  body: JSON.stringify({ urls: [url], query }),
                 });
                 if (!singleResponse.ok) {
                   logger.error('Individual scrape API call failed', {
@@ -188,25 +191,32 @@ export class GoogleService {
                     status: singleResponse.status,
                     statusText: singleResponse.statusText,
                   });
-                  return null;
+                  return { url, summary: null, isQueryRelated: false };
                 }
                 const json = await singleResponse.json();
                 if (!Array.isArray(json.scraped) || json.scraped.length === 0) {
                   logger.error('Unexpected individual scrape API response format', { url });
-                  return null;
+                  return { url, summary: null, isQueryRelated: false };
                 }
                 const item = json.scraped[0];
                 if (item && item.status === 200 && !item.error) {
-                  return item.Summary || '';
+                  // Attempt to parse the Summary field as JSON
+                  try {
+                    const parsed = JSON.parse(item.Summary);
+                    return { url, summary: parsed.summary || '', isQueryRelated: parsed.isQueryRelated || false };
+                  } catch (parseError) {
+                    logger.error('Error parsing individual scrape Summary JSON', { url, error: parseError });
+                    return { url, summary: item.Summary || '', isQueryRelated: false };
+                  }
                 }
-                return null;
+                return { url, summary: null, isQueryRelated: false };
               } catch (error: any) {
                 logger.error('Error calling individual scrape API', {
                   url,
                   error: error.toString(),
                   stack: error.stack,
                 });
-                return null;
+                return { url, summary: null, isQueryRelated: false };
               }
             })
           );
@@ -216,27 +226,37 @@ export class GoogleService {
             status: response.status,
             statusText: response.statusText,
           });
-          return urls.map(() => null);
+          return urls.map(url => ({ url, summary: null, isQueryRelated: false }));
         }
       }
 
       const json = await response.json();
       if (!Array.isArray(json.scraped)) {
         logger.error('Unexpected scrape API response format');
-        return urls.map(() => null);
+        return urls.map(url => ({ url, summary: null, isQueryRelated: false }));
       }
       return json.scraped.map((item: any) => {
         if (item && item.status === 200 && !item.error) {
-          return item.Summary || '';
+          try {
+            const parsed = JSON.parse(item.Summary);
+            return {
+              url: item.url,
+              summary: parsed.summary || '',
+              isQueryRelated: parsed.isQueryRelated || false,
+            };
+          } catch (parseError) {
+            logger.error('Error parsing scrape Summary JSON', { url: item.url, error: parseError });
+            return { url: item.url, summary: item.Summary || '', isQueryRelated: false };
+          }
         }
-        return null;
+        return { url: item.url, summary: null, isQueryRelated: false };
       });
     } catch (e: any) {
       logger.error('Error calling external scrape API', {
         error: e.toString(),
         stack: e.stack,
       });
-      return urls.map(() => null);
+      return urls.map(url => ({ url, summary: null, isQueryRelated: false }));
     }
   }
 }
