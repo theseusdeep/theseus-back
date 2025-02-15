@@ -240,3 +240,5 @@ export class GoogleService {
     }
   }
 }
+
+export const googleService = new GoogleService();
