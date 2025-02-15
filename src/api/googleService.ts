@@ -28,7 +28,9 @@ export class GoogleService {
       return [];
     }
 
-    let searchUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}`;
+    // Default to a recent timeframe, but broaden if results are too few.
+    let timeframe = 'week';
+    let searchUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}&timeframe=${timeframe}`;
 
     if (sites && sites.length > 0) {
       for (const site of sites) {
@@ -52,7 +54,29 @@ export class GoogleService {
       }
 
       const json = await response.json();
-      const results: string[] = Array.isArray(json.results) ? json.results : [];
+      let results: string[] = Array.isArray(json.results) ? json.results : [];
+
+      // If results are too few, broaden timeframe to "month" and combine.
+      if (results.length < Math.min(maxResults, 3)) {
+        timeframe = 'month';
+        let broaderUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}&timeframe=${timeframe}`;
+        if (sites && sites.length > 0) {
+          for (const site of sites) {
+            broaderUrl += `&sites=${encodeURIComponent(site)}`;
+          }
+        }
+        const broaderResponse = await fetch(broaderUrl, {
+          headers: {
+            'x-api-key': EXTERNAL_API_KEY,
+          },
+        });
+        if (broaderResponse.ok) {
+          const broaderJson = await broaderResponse.json();
+          const broaderResults: string[] = Array.isArray(broaderJson.results) ? broaderJson.results : [];
+          results = Array.from(new Set([...results, ...broaderResults]));
+        }
+      }
+
       logger.info('External search API succeeded', { resultsCount: results.length });
       return results.slice(0, maxResults);
     } catch (e: any) {
