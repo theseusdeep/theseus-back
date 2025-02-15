@@ -200,14 +200,11 @@ export class GoogleService {
                 }
                 const item = json.scraped[0];
                 if (item && item.status === 200 && !item.error) {
-                  // Attempt to parse the Summary field as JSON
-                  try {
-                    const parsed = JSON.parse(item.Summary);
-                    return { url, summary: parsed.summary || '', isQueryRelated: parsed.isQueryRelated || false };
-                  } catch (parseError) {
-                    logger.error('Error parsing individual scrape Summary JSON', { url, error: parseError });
-                    return { url, summary: item.Summary || '', isQueryRelated: false };
-                  }
+                  return { 
+                    url, 
+                    summary: item.Summary || '', 
+                    isQueryRelated: item.IsQueryRelated === true 
+                  };
                 }
                 return { url, summary: null, isQueryRelated: false };
               } catch (error: any) {
@@ -237,17 +234,11 @@ export class GoogleService {
       }
       return json.scraped.map((item: any) => {
         if (item && item.status === 200 && !item.error) {
-          try {
-            const parsed = JSON.parse(item.Summary);
-            return {
-              url: item.url,
-              summary: parsed.summary || '',
-              isQueryRelated: parsed.isQueryRelated || false,
-            };
-          } catch (parseError) {
-            logger.error('Error parsing scrape Summary JSON', { url: item.url, error: parseError });
-            return { url: item.url, summary: item.Summary || '', isQueryRelated: false };
-          }
+          return {
+            url: item.url,
+            summary: item.Summary || '',
+            isQueryRelated: item.IsQueryRelated === true,
+          };
         }
         return { url: item.url, summary: null, isQueryRelated: false };
       });
