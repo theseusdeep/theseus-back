@@ -246,6 +246,7 @@ async function processSerpResult({
   const validResults = scrapedResults.filter(item => item.summary && item.isQueryRelated);
   const validContents = validResults.map(item => item.summary);
   const validUrls = validResults.map(item => item.url);
+  logger.debug('processSerpResult valid URLs', { validUrls });
 
   logger.info(`Ran "${query}", retrieved content for ${validUrls.length} URLs`);
   try {
@@ -397,14 +398,19 @@ export async function writeFinalReport({
     const combinedLearnings = learnings.join('\n');
     const executiveSummary = await generateSummary(combinedLearnings, selectedModel);
 
+    const additionalUrls = topUrls ? topUrls.map(item => item.url) : [];
+    const allCitations = Array.from(new Set([...visitedUrls, ...additionalUrls]));
+    const citationsMarkdown = allCitations.map(url => `- [${url}](${url})`).join('\n');
+
     const promptText = `Executive Summary:
 ${executiveSummary}
 
 User Input: "${prompt}"
 Research Learnings:
 ${learnings.join('\n')}
-\nVerified URLs:
-${visitedUrls.join('\n')}`;
+
+## Citations:
+${citationsMarkdown}`;
     
     const res = await generateObjectSanitized({
       model: selectedModel ? createModel(selectedModel) : deepSeekModel,
@@ -420,7 +426,7 @@ ${visitedUrls.join('\n')}`;
     return safeResult.reportMarkdown.replace(/\\n/g, '\n');
   } catch (error) {
     logger.error('Error generating final report', { error });
-    return `# Research Report\n\nUser Input: ${prompt}\n\nKey Learnings:\n${learnings.join('\n')}\n\nVerified URLs:\n${visitedUrls.join('\n')}`;
+    return `# Research Report\n\nUser Input: ${prompt}\n\nKey Learnings:\n${learnings.join('\n')}\n\n## Citations:\n${visitedUrls.map(url => `- ${url}`).join('\n')}`;
   }
 }
 
@@ -598,3 +604,4 @@ export async function deepResearch({
   });
   return finalResult;
 }
+
