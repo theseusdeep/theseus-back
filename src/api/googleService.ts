@@ -55,80 +55,7 @@ export class GoogleService {
 
       const json = await response.json();
       const results: string[] = Array.isArray(json.results) ? json.results : [];
-      logger.info('External search API succeeded', { resultsCount: results.length });
-
-      // If very few results, try a fallback with "month" timeframe.
-      if (results.length < 3) {
-        logger.info('Few results obtained from primary search, trying fallback with "month" timeframe', { currentTimeframe: timeframe });
-        const fallbackMonthTimeframe = "month";
-        let fallbackMonthUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}&timeframe=${fallbackMonthTimeframe}`;
-        if (sites && sites.length > 0) {
-          for (const site of sites) {
-            fallbackMonthUrl += `&sites=${encodeURIComponent(site)}`;
-          }
-        }
-        const fallbackMonthResponse = await fetch(fallbackMonthUrl, {
-          headers: {
-            'x-api-key': EXTERNAL_API_KEY,
-          },
-        });
-        if (fallbackMonthResponse.ok) {
-          const fallbackMonthJson = await fallbackMonthResponse.json();
-          const fallbackMonthResults: string[] = Array.isArray(fallbackMonthJson.results) ? fallbackMonthJson.results : [];
-
-          // If "month" fallback returns too few results, try with "year"
-          if (fallbackMonthResults.length < 3) {
-            logger.info('Fallback with "month" timeframe returned few results, trying fallback with "year" timeframe');
-            const fallbackYearTimeframe = "year";
-            let fallbackYearUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}&timeframe=${fallbackYearTimeframe}`;
-            if (sites && sites.length > 0) {
-              for (const site of sites) {
-                fallbackYearUrl += `&sites=${encodeURIComponent(site)}`;
-              }
-            }
-            const fallbackYearResponse = await fetch(fallbackYearUrl, {
-              headers: {
-                'x-api-key': EXTERNAL_API_KEY,
-              },
-            });
-            if (fallbackYearResponse.ok) {
-              const fallbackYearJson = await fallbackYearResponse.json();
-              const fallbackYearResults: string[] = Array.isArray(fallbackYearJson.results) ? fallbackYearJson.results : [];
-
-              // If "year" fallback still returns too few results, try with no timeframe.
-              if (fallbackYearResults.length < 3) {
-                logger.info('Fallback with "year" timeframe returned few results, trying extra fallback with no timeframe');
-                let extraFallbackUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}`;
-                if (sites && sites.length > 0) {
-                  for (const site of sites) {
-                    extraFallbackUrl += `&sites=${encodeURIComponent(site)}`;
-                  }
-                }
-                const extraFallbackResponse = await fetch(extraFallbackUrl, {
-                  headers: {
-                    'x-api-key': EXTERNAL_API_KEY,
-                  },
-                });
-                if (extraFallbackResponse.ok) {
-                  const extraFallbackJson = await extraFallbackResponse.json();
-                  const extraFallbackResults: string[] = Array.isArray(extraFallbackJson.results) ? extraFallbackJson.results : [];
-                  const mergedResults = Array.from(new Set([...results, ...fallbackMonthResults, ...fallbackYearResults, ...extraFallbackResults]));
-                  logger.info('Merged extra fallback results', { mergedCount: mergedResults.length });
-                  return mergedResults.slice(0, maxResults);
-                }
-              } else {
-                const mergedResults = Array.from(new Set([...results, ...fallbackMonthResults, ...fallbackYearResults]));
-                logger.info('Merged fallback results from primary, month and year', { mergedCount: mergedResults.length });
-                return mergedResults.slice(0, maxResults);
-              }
-            }
-          } else {
-            const mergedResults = Array.from(new Set([...results, ...fallbackMonthResults]));
-            logger.info('Merged fallback results from primary and month', { mergedCount: mergedResults.length });
-            return mergedResults.slice(0, maxResults);
-          }
-        }
-      }
+      logger.info('External search API succeeded', { resultsCount: results.length, effectiveTimeframe: json.timeframe });
 
       return results.slice(0, maxResults);
     } catch (e: any) {
@@ -145,6 +72,9 @@ export class GoogleService {
    * Now includes the search query in the request body.
    * Returns an array of objects with properties: url, summary, and isQueryRelated.
    * If a bulk call returns a 504 (Gateway Timeout), fall back to individual calls.
+   * Additionally, if any scraped result includes a non-empty relatedURLs array,
+   * it will perform an extra scraping call for those URLs and merge their content
+   * into the current research step.
    * @param urls An array of URLs to scrape
    * @param query The search query used for filtering relevance
    * @returns An array of objects containing scraped summary and relatedness flag for each URL.
@@ -232,16 +162,77 @@ export class GoogleService {
         logger.error('Unexpected scrape API response format');
         return urls.map(url => ({ url, summary: null, isQueryRelated: false }));
       }
-      return json.scraped.map((item: any) => {
-        if (item && item.status === 200 && !item.error) {
-          return {
-            url: item.url,
-            summary: item.Summary || '',
-            isQueryRelated: item.IsQueryRelated === true,
-          };
-        }
-        return { url: item.url, summary: null, isQueryRelated: false };
+
+      // Process primary scraped results and include relatedURLs if present
+      const primaryResults = json.scraped.map((item: any) => {
+        return {
+          url: item.url,
+          summary: item && item.status === 200 && !item.error ? (item.Summary || '') : null,
+          isQueryRelated: item && item.status === 200 && !item.error && item.IsQueryRelated === true,
+          relatedURLs: Array.isArray(item.relatedURLs) ? item.relatedURLs : []
+        };
       });
+
+      // Collect additional URLs from relatedURLs
+      const additionalURLsSet = new Set<string>();
+      primaryResults.forEach(item => {
+        if (item.relatedURLs && item.relatedURLs.length > 0) {
+          item.relatedURLs.forEach((relatedUrl: string) => {
+            additionalURLsSet.add(relatedUrl);
+          });
+        }
+      });
+      // Remove URLs already present in primaryResults to avoid duplicates
+      primaryResults.forEach(item => {
+        additionalURLsSet.delete(item.url);
+      });
+      const additionalURLs = Array.from(additionalURLsSet);
+      let additionalResults: Array<{ url: string, summary: string | null, isQueryRelated: boolean }> = [];
+      if (additionalURLs.length > 0) {
+        logger.info('Scraping related URLs', { count: additionalURLs.length });
+        const relatedResponse = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': EXTERNAL_API_KEY,
+          },
+          body: JSON.stringify({ urls: additionalURLs, query }),
+        });
+        if (relatedResponse.ok) {
+          const relatedJson = await relatedResponse.json();
+          if (Array.isArray(relatedJson.scraped)) {
+            additionalResults = relatedJson.scraped.map((item: any) => {
+              return {
+                url: item.url,
+                summary: item && item.status === 200 && !item.error ? (item.Summary || '') : null,
+                isQueryRelated: item && item.status === 200 && !item.error && item.IsQueryRelated === true,
+              };
+            });
+          } else {
+            logger.error('Unexpected related scrape API response format');
+          }
+        } else {
+          logger.error('Related scrape API call failed', {
+            status: relatedResponse.status,
+            statusText: relatedResponse.statusText,
+          });
+        }
+      }
+
+      // Merge primaryResults and additionalResults, deduplicating by URL
+      const mergedMap = new Map<string, { url: string, summary: string | null, isQueryRelated: boolean }>();
+      primaryResults.forEach(item => {
+        mergedMap.set(item.url, { url: item.url, summary: item.summary, isQueryRelated: item.isQueryRelated });
+      });
+      additionalResults.forEach(item => {
+        if (!mergedMap.has(item.url)) {
+          mergedMap.set(item.url, item);
+        }
+      });
+
+      const mergedResults = Array.from(mergedMap.values());
+      logger.info('Scrape API succeeded', { totalResults: mergedResults.length });
+      return mergedResults;
     } catch (e: any) {
       logger.error('Error calling external scrape API', {
         error: e.toString(),
