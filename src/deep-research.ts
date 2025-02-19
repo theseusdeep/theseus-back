@@ -241,14 +241,22 @@ async function processSerpResult({
   includeTopUrls?: boolean;
 }) {
   // Call scrape with the search query so that the API can determine if each result is related.
+  // Note: the query passed here is the same as used in the google search (which is URI encoded there) but remains unencoded here.
   const scrapedResults = await googleService.scrape(result, query);
-  // Filter to keep only the URLs that returned a summary and are query related.
-  const validResults = scrapedResults.filter(item => item.summary && item.isQueryRelated);
+  // Filter to keep only the URLs that returned a non‑empty summary.
+  const validResults = scrapedResults.filter(item => item.summary);
   const validContents = validResults.map(item => item.summary);
-  const validUrls = validResults.map(item => item.url);
-  logger.debug('processSerpResult valid URLs', { validUrls });
-
-  logger.info(`Ran "${query}", retrieved content for ${validUrls.length} URLs`);
+  const visitedUrls = validResults.map(item => item.url);
+  logger.debug('processSerpResult valid URLs', { validUrls: visitedUrls });
+  logger.info(`Ran "${query}", retrieved content for ${visitedUrls.length} URLs`, { visitedUrls });
+  
+  // Separately, store all URLs with the isQueryRelated flag set to true for candidate top recommendations.
+  const flaggedResults = scrapedResults.filter(item => item.isQueryRelated);
+  const computedTopUrls = flaggedResults.map(item => ({
+    url: item.url,
+    description: item.summary || '',
+  }));
+  
   try {
     let trimmedContents = validContents.join('\n\n');
     let promptText = `Conduct a rigorous and scholarly analysis of the following search results for "${query}". Generate ${numLearnings} key insights and ${numFollowUpQuestions} thought‑provoking follow‑up questions that are deeply grounded in current research trends and critical evaluation.${includeTopUrls ? ' Also, identify candidate top recommendations with clear, evidence‑based justification.' : ''}
@@ -324,8 +332,8 @@ Required JSON format:
     return {
       learnings: safeResult.learnings,
       followUpQuestions: safeResult.followUpQuestions,
-      visitedUrls: validUrls,
-      topUrls: safeResult.topUrls || [],
+      visitedUrls: visitedUrls,
+      topUrls: safeResult.topUrls && safeResult.topUrls.length > 0 ? safeResult.topUrls : computedTopUrls,
     };
   } catch (error) {
     logger.error('Error processing SERP result', { error });
@@ -341,7 +349,7 @@ Required JSON format:
         'How does this compare with alternative perspectives?',
       ].slice(0, numFollowUpQuestions),
       topUrls: [],
-      visitedUrls: validUrls,
+      visitedUrls: visitedUrls,
     };
   }
 }
@@ -604,4 +612,3 @@ export async function deepResearch({
   });
   return finalResult;
 }
-
