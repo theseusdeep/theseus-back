@@ -2,13 +2,38 @@ import { logger } from './utils/logger';
 
 const EXTERNAL_API_KEY = process.env.SEARCH_API_KEY || '';
 
+// Parse the list of endpoints from SEARCH_SCRAPE_ENDPOINTS (comma-separated). Fallback to the original single endpoint if empty.
+const endpointsEnv = process.env.SEARCH_SCRAPE_ENDPOINTS || '';
+const parsedEndpoints = endpointsEnv
+  .split(',')
+  .map(e => e.trim())
+  .filter(Boolean);
+const SEARCH_SCRAPE_ENDPOINTS = parsedEndpoints.length
+  ? parsedEndpoints
+  : ['google-twitter-scraper.vercel.app'];
+
+// Simple round-robin index
+let roundRobinIndex = 0;
+
+/**
+ * Returns the next endpoint in the round-robin list.
+ */
+function getNextEndpoint(): string {
+  const endpoint = SEARCH_SCRAPE_ENDPOINTS[roundRobinIndex % SEARCH_SCRAPE_ENDPOINTS.length];
+  roundRobinIndex++;
+  return endpoint;
+}
+
 /**
  * Outsourced service to retrieve Google search results and scrape their contents
- * from an external API (https://google-twitter-scraper.vercel.app).
+ * from an external API (e.g. https://google-twitter-scraper.vercel.app).
  */
 export class GoogleService {
   constructor() {
-    logger.info('GoogleService initialized using external API for search & scraping', { apiKeyPresent: !!EXTERNAL_API_KEY });
+    logger.info('GoogleService initialized using external API for search & scraping', {
+      apiKeyPresent: !!EXTERNAL_API_KEY,
+      endpoints: SEARCH_SCRAPE_ENDPOINTS,
+    });
   }
 
   /**
@@ -26,12 +51,16 @@ export class GoogleService {
     }
 
     // Determine timeframe heuristically based on query keywords.
-    let timeframe = "week"; // default timeframe
+    let timeframe = 'week'; // default timeframe
     if (/latest|new|current/i.test(query)) {
-      timeframe = "24h";
+      timeframe = '24h';
     }
 
-    let searchUrl = `https://google-twitter-scraper.vercel.app/google/search?query=${encodeURIComponent(query)}&max_results=${maxResults}&timeframe=${timeframe}`;
+    // Pick the next endpoint in round-robin
+    const baseEndpoint = getNextEndpoint();
+    let searchUrl = `https://${baseEndpoint}/google/search?query=${encodeURIComponent(
+      query,
+    )}&max_results=${maxResults}&timeframe=${timeframe}`;
     if (sites && sites.length > 0) {
       for (const site of sites) {
         searchUrl += `&sites=${encodeURIComponent(site)}`;
@@ -55,7 +84,10 @@ export class GoogleService {
 
       const json = await response.json();
       const results: string[] = Array.isArray(json.results) ? json.results : [];
-      logger.info('External search API succeeded', { resultsCount: results.length, effectiveTimeframe: json.timeframe });
+      logger.info('External search API succeeded', {
+        resultsCount: results.length,
+        effectiveTimeframe: json.timeframe,
+      });
 
       return results.slice(0, maxResults);
     } catch (e: any) {
@@ -79,7 +111,10 @@ export class GoogleService {
    * @param query The search query used for filtering relevance
    * @returns An array of objects containing scraped summary and relatedness flag for each URL.
    */
-  public async scrape(urls: string[], query: string): Promise<Array<{ url: string, summary: string | null, isQueryRelated: boolean }>> {
+  public async scrape(
+    urls: string[],
+    query: string,
+  ): Promise<Array<{ url: string; summary: string | null; isQueryRelated: boolean }>> {
     logger.debug('GoogleService: scrape called', { urlsCount: urls.length, query });
     if (!EXTERNAL_API_KEY) {
       logger.error('Missing SEARCH_API_KEY environment variable');
@@ -90,7 +125,10 @@ export class GoogleService {
       return [];
     }
 
-    const endpoint = 'https://google-twitter-scraper.vercel.app/web/scrape';
+    // Pick the next endpoint in round-robin
+    const baseEndpoint = getNextEndpoint();
+    const endpoint = `https://${baseEndpoint}/web/scrape`;
+
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -105,9 +143,12 @@ export class GoogleService {
         if (response.status === 504) {
           logger.warn('Bulk scrape API call timed out (504). Falling back to individual URL scraping.');
           const results = await Promise.all(
-            urls.map(async (url) => {
+            urls.map(async url => {
               try {
-                const singleResponse = await fetch(endpoint, {
+                // Round-robin again for each single scrape call
+                const singleBase = getNextEndpoint();
+                const singleEndpoint = `https://${singleBase}/web/scrape`;
+                const singleResponse = await fetch(singleEndpoint, {
                   method: 'POST',
                   headers: {
                     'Content-Type': 'application/json',
@@ -130,10 +171,10 @@ export class GoogleService {
                 }
                 const item = json.scraped[0];
                 if (item && item.status === 200 && !item.error) {
-                  return { 
-                    url, 
-                    summary: item.Summary || '', 
-                    isQueryRelated: item.IsQueryRelated === true 
+                  return {
+                    url,
+                    summary: item.Summary || '',
+                    isQueryRelated: item.IsQueryRelated === true,
                   };
                 }
                 return { url, summary: null, isQueryRelated: false };
@@ -145,7 +186,7 @@ export class GoogleService {
                 });
                 return { url, summary: null, isQueryRelated: false };
               }
-            })
+            }),
           );
           return results;
         } else {
@@ -167,9 +208,9 @@ export class GoogleService {
       const primaryResults = json.scraped.map((item: any) => {
         return {
           url: item.url,
-          summary: item && item.status === 200 && !item.error ? (item.Summary || '') : null,
+          summary: item && item.status === 200 && !item.error ? item.Summary || '' : null,
           isQueryRelated: item && item.status === 200 && !item.error && item.IsQueryRelated === true,
-          relatedURLs: Array.isArray(item.relatedURLs) ? item.relatedURLs : []
+          relatedURLs: Array.isArray(item.relatedURLs) ? item.relatedURLs : [],
         };
       });
 
@@ -187,10 +228,13 @@ export class GoogleService {
         additionalURLsSet.delete(item.url);
       });
       const additionalURLs = Array.from(additionalURLsSet);
-      let additionalResults: Array<{ url: string, summary: string | null, isQueryRelated: boolean }> = [];
+      let additionalResults: Array<{ url: string; summary: string | null; isQueryRelated: boolean }> = [];
       if (additionalURLs.length > 0) {
         logger.info('Scraping related URLs', { count: additionalURLs.length });
-        const relatedResponse = await fetch(endpoint, {
+        // Round-robin for the related scrape call
+        const relatedBase = getNextEndpoint();
+        const relatedEndpoint = `https://${relatedBase}/web/scrape`;
+        const relatedResponse = await fetch(relatedEndpoint, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -204,8 +248,9 @@ export class GoogleService {
             additionalResults = relatedJson.scraped.map((item: any) => {
               return {
                 url: item.url,
-                summary: item && item.status === 200 && !item.error ? (item.Summary || '') : null,
-                isQueryRelated: item && item.status === 200 && !item.error && item.IsQueryRelated === true,
+                summary: item && item.status === 200 && !item.error ? item.Summary || '' : null,
+                isQueryRelated:
+                  item && item.status === 200 && !item.error && item.IsQueryRelated === true,
               };
             });
           } else {
@@ -220,9 +265,16 @@ export class GoogleService {
       }
 
       // Merge primaryResults and additionalResults, deduplicating by URL
-      const mergedMap = new Map<string, { url: string, summary: string | null, isQueryRelated: boolean }>();
+      const mergedMap = new Map<
+        string,
+        { url: string; summary: string | null; isQueryRelated: boolean }
+      >();
       primaryResults.forEach(item => {
-        mergedMap.set(item.url, { url: item.url, summary: item.summary, isQueryRelated: item.isQueryRelated });
+        mergedMap.set(item.url, {
+          url: item.url,
+          summary: item.summary,
+          isQueryRelated: item.isQueryRelated,
+        });
       });
       additionalResults.forEach(item => {
         if (!mergedMap.has(item.url)) {
