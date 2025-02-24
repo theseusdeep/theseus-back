@@ -20,18 +20,12 @@ function getMaxContextTokens(model?: string) {
 
 function getMaxConcurrency(modelId: string): number {
   const modelIdLower = modelId.toLowerCase();
-
-  // Large models (70B+)
   if (modelIdLower.match(/(70b|72b|claude-3|deepseek-r1)/)) {
     return 1;
   }
-
-  // Medium models (32-34B)
   if (modelIdLower.match(/(32b|34b)/)) {
     return 1;
   }
-
-  // Small models (≤15B)
   return 4;
 }
 
@@ -39,12 +33,9 @@ export interface ResearchResult {
   learnings: string[];
   visitedUrls: string[];
   topUrls: Array<{ url: string; description: string }>;
+  relevantUrls: string[]; // Added for Task 3
 }
 
-/**
- * Remove any <think>...</think> blocks. If a "{" exists, return the substring
- * from the first "{" to the last "}".
- */
 export function sanitizeDeepSeekOutput(raw: string): string {
   const withoutThink = raw.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
   const firstBrace = withoutThink.indexOf('{');
@@ -58,10 +49,6 @@ export function sanitizeDeepSeekOutput(raw: string): string {
   return withoutThink.slice(firstBrace, lastBrace + 1).trim();
 }
 
-/**
- * Calls the model ensuring the Venice parameter is always included.
- * Logs the prompts and sanitizes the response.
- */
 export async function generateObjectSanitized<T>(params: any): Promise<{ object: T }> {
   let res;
   logger.debug('generateObjectSanitized called', {
@@ -70,7 +57,6 @@ export async function generateObjectSanitized<T>(params: any): Promise<{ object:
     prompt: params.prompt,
   });
 
-  // Always force include_venice_system_prompt to false.
   params.venice_parameters = { include_venice_system_prompt: false };
 
   res = await params.model(params);
@@ -97,7 +83,6 @@ export async function generateObjectSanitized<T>(params: any): Promise<{ object:
         sanitizedSnippet: sanitized.substring(0, 200),
         sanitizedLength: sanitized.length,
       });
-      // Attempt to repair the sanitized JSON by trimming to the last closing brace.
       const lastIndex = sanitized.lastIndexOf('}');
       if (lastIndex !== -1) {
         const repaired = sanitized.substring(0, lastIndex + 1);
@@ -129,9 +114,6 @@ interface SerpResponse {
   queries: SerpQuery[];
 }
 
-/**
- * Generates SERP queries based on the research topic and optional previous insights.
- */
 async function generateSerpQueries({
   query,
   numQueries = 3,
@@ -144,7 +126,6 @@ async function generateSerpQueries({
   selectedModel?: string;
 }) {
   try {
-    // Updated prompt: ensure queries are of optimal length (approximately 8-12 words)
     const promptText = `Generate ${numQueries} professional, rigorously crafted, and innovative search queries to explore the following research topic. Each query should be descriptive and of optimal length (approximately 8-12 words) and must be paired with a brief, actionable research goal that leverages modern analytical frameworks and adheres to industry best practices.
     
 Topic: "${query}"
@@ -222,9 +203,6 @@ Required JSON format:
   }
 }
 
-/**
- * Processes SERP results to extract key insights and follow‑up questions.
- */
 async function processSerpResult({
   query,
   result,
@@ -240,23 +218,20 @@ async function processSerpResult({
   selectedModel?: string;
   includeTopUrls?: boolean;
 }) {
-  // Call scrape with the search query so that the API can determine if each result is related.
-  // Note: the query passed here is the same as used in the google search (which is URI encoded there) but remains unencoded here.
   const scrapedResults = await googleService.scrape(result, query);
-  // Filter to keep only the URLs that returned a non‑empty summary.
   const validResults = scrapedResults.filter(item => item.summary);
   const validContents = validResults.map(item => item.summary);
   const visitedUrls = validResults.map(item => item.url);
+  const relevantUrls = scrapedResults.filter(item => item.isQueryRelated).map(item => item.url); // Added for Task 3
   logger.debug('processSerpResult valid URLs', { validUrls: visitedUrls });
   logger.info(`Ran "${query}", retrieved content for ${visitedUrls.length} URLs`, { visitedUrls });
-  
-  // Separately, store all URLs with the isQueryRelated flag set to true for candidate top recommendations.
+
   const flaggedResults = scrapedResults.filter(item => item.isQueryRelated);
   const computedTopUrls = flaggedResults.map(item => ({
     url: item.url,
     description: item.summary || '',
   }));
-  
+
   try {
     let trimmedContents = validContents.join('\n\n');
     let promptText = `Conduct a rigorous and scholarly analysis of the following search results for "${query}". Generate ${numLearnings} key insights and ${numFollowUpQuestions} thought‑provoking follow‑up questions that are deeply grounded in current research trends and critical evaluation.${includeTopUrls ? ' Also, identify candidate top recommendations with clear, evidence‑based justification.' : ''}
@@ -334,6 +309,7 @@ Required JSON format:
       followUpQuestions: safeResult.followUpQuestions,
       visitedUrls: visitedUrls,
       topUrls: safeResult.topUrls && safeResult.topUrls.length > 0 ? safeResult.topUrls : computedTopUrls,
+      relevantUrls, // Added for Task 3
     };
   } catch (error) {
     logger.error('Error processing SERP result', { error });
@@ -350,13 +326,11 @@ Required JSON format:
       ].slice(0, numFollowUpQuestions),
       topUrls: [],
       visitedUrls: visitedUrls,
+      relevantUrls: [], // Added for Task 3
     };
   }
 }
 
-/**
- * Generates an executive summary from provided content using the new summarization model.
- */
 export async function generateSummary(content: string, selectedModel?: string): Promise<string> {
   if (!content.trim()) {
     logger.warn('generateSummary called with empty content, returning empty summary');
@@ -381,11 +355,6 @@ export async function generateSummary(content: string, selectedModel?: string): 
   }
 }
 
-/**
- * Generates the final report.
- * This function only supplies the LLM with the user input, research learnings, and verified URLs.
- * The structure of the report is determined solely by the system prompt from src/report_prompt.ts.
- */
 export async function writeFinalReport({
   prompt,
   learnings,
@@ -393,6 +362,7 @@ export async function writeFinalReport({
   selectedModel,
   language,
   topUrls,
+  relevantUrls, // Added for Task 3
 }: {
   prompt: string;
   learnings: string[];
@@ -400,15 +370,13 @@ export async function writeFinalReport({
   selectedModel?: string;
   language?: string;
   topUrls?: Array<{ url: string; description: string }>;
+  relevantUrls: string[]; // Added for Task 3
 }) {
   try {
-    // First, generate an executive summary from the learnings.
     const combinedLearnings = learnings.join('\n');
     const executiveSummary = await generateSummary(combinedLearnings, selectedModel);
 
-    const additionalUrls = topUrls ? topUrls.map(item => item.url) : [];
-    const allCitations = Array.from(new Set([...visitedUrls, ...additionalUrls]));
-    const citationsMarkdown = allCitations.map(url => `- [${url}](${url})`).join('\n');
+    const citationsMarkdown = relevantUrls.map(url => `- [${url}](${url})`).join('\n');
 
     const promptText = `Executive Summary:
 ${executiveSummary}
@@ -434,7 +402,7 @@ ${citationsMarkdown}`;
     return safeResult.reportMarkdown.replace(/\\n/g, '\n');
   } catch (error) {
     logger.error('Error generating final report', { error });
-    return `# Research Report\n\nUser Input: ${prompt}\n\nKey Learnings:\n${learnings.join('\n')}\n\n## Citations:\n${visitedUrls.map(url => `- ${url}`).join('\n')}`;
+    return `# Research Report\n\nUser Input: ${prompt}\n\nKey Learnings:\n${learnings.join('\n')}\n\n## Citations:\n${relevantUrls.map(url => `- ${url}`).join('\n')}`; // Updated for Task 3
   }
 }
 
@@ -442,9 +410,6 @@ interface SerpCandidates {
   finalTopUrls: Array<{ url: string; description: string }>;
 }
 
-/**
- * Finalizes candidate top recommendations.
- */
 async function finalizeTopRecommendations(
   candidates: Array<{ url: string; description: string }>,
   count: number,
@@ -469,10 +434,6 @@ Return the result as a JSON object with a key "finalTopUrls" that is an array of
   return res.object.finalTopUrls;
 }
 
-/**
- * Performs deep research with optional progress updates, supports continuation research,
- * and can be aborted via the provided abortSignal.
- */
 export async function deepResearch({
   query,
   breadth,
@@ -542,6 +503,7 @@ export async function deepResearch({
             (u): u is string => u !== undefined,
           );
           const currentTopUrls = newLearnings.topUrls || [];
+          const allRelevantUrls = newLearnings.relevantUrls || []; // Added for Task 3
           const newDepth = depth - 1;
           if (newDepth > 0) {
             logger.info('Researching deeper', { nextBreadth: Math.ceil(breadth / 2), nextDepth: newDepth });
@@ -566,12 +528,14 @@ export async function deepResearch({
               learnings: deeperResult.learnings,
               visitedUrls: deeperResult.visitedUrls,
               topUrls: [...currentTopUrls, ...deeperResult.topUrls],
+              relevantUrls: [...allRelevantUrls, ...deeperResult.relevantUrls], // Added for Task 3
             };
           } else {
             return {
               learnings: allLearnings,
               visitedUrls: allUrls,
               topUrls: currentTopUrls,
+              relevantUrls: allRelevantUrls, // Added for Task 3
             };
           }
         } catch (e) {
@@ -580,6 +544,7 @@ export async function deepResearch({
             learnings: [],
             visitedUrls: [],
             topUrls: [],
+            relevantUrls: [], // Added for Task 3
           };
         }
       })
@@ -592,6 +557,7 @@ export async function deepResearch({
   ];
   const allTopUrls = results.flatMap((r) => r.topUrls);
   const uniqueTopUrls = Array.from(new Map(allTopUrls.map((item) => [item.url, item])).values());
+  const allRelevantUrls = [...new Set(results.flatMap((r) => r.relevantUrls))]; // Added for Task 3
 
   let finalTopUrls = uniqueTopUrls;
   if (finalTopUrls.length > 0) {
@@ -604,11 +570,77 @@ export async function deepResearch({
     learnings: allLearnings,
     visitedUrls: allVisitedUrls,
     topUrls: finalTopUrls,
+    relevantUrls: allRelevantUrls, // Added for Task 3
   };
   logger.info('deepResearch completed', {
     learningsCount: finalResult.learnings.length,
     visitedUrlsCount: finalResult.visitedUrls.length,
     topUrlsCount: finalResult.topUrls.length,
+    relevantUrlsCount: finalResult.relevantUrls.length, // Added for Task 3
   });
   return finalResult;
+}
+
+import { generateObject } from 'ai';
+import { z } from 'zod';
+import { createModel, deepSeekModel } from './ai/providers';
+import { feedbackPrompt } from './feedback_prompt';
+import { generateObjectSanitized } from './deep-research';
+import { logger } from './api/utils/logger';
+
+interface FeedbackResponse {
+  questions: string[];
+  language: string;
+}
+
+export async function generateFeedback({
+  query,
+  numQuestions = 3,
+  selectedModel,
+}: {
+  query: string;
+  numQuestions?: number;
+  selectedModel?: string;
+}): Promise<{ questions: string[]; language: string }> {
+  const fallback: { questions: string[]; language: string } = {
+    questions: [
+      'Could you provide more specific details about what you want to learn?',
+      'What is your main goal with this research?',
+      'Are there any specific aspects you want to focus on?',
+    ].slice(0, numQuestions),
+    language: 'English',
+  };
+
+  try {
+    logger.info('generateFeedback called', { query, numQuestions, selectedModel });
+    let userFeedback;
+    try {
+      userFeedback = await generateObjectSanitized({
+        model: selectedModel ? createModel(selectedModel) : deepSeekModel,
+        system: feedbackPrompt(),
+        prompt: `Given the following query from the user, generate ${numQuestions} follow-up questions to clarify the research direction. Also, detect and return the language of the query. Format your response as a JSON object with two keys: "questions" (an array of questions) and "language" (a string representing the detected language).
+
+Query: "${query}"
+
+Example response format:
+{"questions": ["What specific aspects of this topic interest you most?", "Are you looking for current developments or historical context?", "What is your intended use case for this information?"], "language": "English"}`,
+        schema: z.object({
+          questions: z.array(z.string()).min(1).max(numQuestions).describe('Follow up questions to clarify the research direction'),
+          language: z.string().describe('Detected language of the user query'),
+        }),
+        maxTokens: 8192,
+        temperature: 0.7,
+      });
+    } catch (innerError) {
+      logger.error('Error in generateObjectSanitized in generateFeedback', { innerError });
+      return fallback;
+    }
+
+    const typedFeedback = userFeedback.object as FeedbackResponse;
+    logger.info('Feedback generated', { questions: typedFeedback.questions, language: typedFeedback.language });
+    return { questions: typedFeedback.questions.slice(0, numQuestions), language: typedFeedback.language };
+  } catch (error) {
+    logger.error('Error generating feedback', { error });
+    return fallback;
+  }
 }
