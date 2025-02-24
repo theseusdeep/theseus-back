@@ -39,14 +39,17 @@ export interface ResearchResult {
 export function sanitizeDeepSeekOutput(raw: string): string {
   // Remove all <think> blocks and their contents
   let cleaned = raw.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-  
-  // Extract the first valid JSON object
-  const jsonMatch = cleaned.match(/\{[\s\S]*?\}/);
-  if (jsonMatch) {
-    return jsonMatch[0];
+
+  // Find the substring between the first '{' and the last '}'
+  const firstBrace = cleaned.indexOf('{');
+  const lastBrace = cleaned.lastIndexOf('}');
+
+  // If both braces are found and the positions are valid, extract the JSON substring
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    return cleaned.slice(firstBrace, lastBrace + 1).trim();
   }
-  
-  // Return empty string if no valid JSON is found
+
+  // If no valid JSON object is found, return an empty string to trigger fallback
   return '';
 }
 
@@ -77,14 +80,12 @@ export async function generateObjectSanitized<T>(params: any): Promise<{ object:
         rawTextSnippet: rawText.substring(0, 200),
       });
       // Provide context-specific fallback
-      if (params.prompt.includes('finalTopUrls')) {
-        return { object: { finalTopUrls: [] } as T };
-      } else if (params.prompt.includes('summary')) {
-        return { object: { summary: 'Unable to generate summary due to incomplete response.' } as T };
-      } else if (params.prompt.includes('queries')) {
+      if (params.prompt.includes('queries')) {
         return { object: { queries: [] } as T };
+      } else if (params.prompt.includes('summary')) {
+        return { object: { summary: 'No se pudo generar el resumen debido a una respuesta incompleta.' } as T };
       } else if (params.prompt.includes('reportMarkdown')) {
-        return { object: { reportMarkdown: 'Unable to generate report due to incomplete response.' } as T };
+        return { object: { reportMarkdown: 'No se pudo generar el informe debido a una respuesta incompleta.' } as T };
       } else {
         return { object: {} as T }; // Generic fallback
       }
@@ -108,14 +109,12 @@ export async function generateObjectSanitized<T>(params: any): Promise<{ object:
         sanitizedLength: sanitized.length,
       });
       // Provide context-specific fallback
-      if (params.prompt.includes('finalTopUrls')) {
-        return { object: { finalTopUrls: [] } as T };
-      } else if (params.prompt.includes('summary')) {
-        return { object: { summary: 'Unable to generate summary due to parsing error.' } as T };
-      } else if (params.prompt.includes('queries')) {
+      if (params.prompt.includes('queries')) {
         return { object: { queries: [] } as T };
+      } else if (params.prompt.includes('summary')) {
+        return { object: { summary: 'No se pudo generar el resumen debido a un error de análisis.' } as T };
       } else if (params.prompt.includes('reportMarkdown')) {
-        return { object: { reportMarkdown: 'Unable to generate report due to parsing error.' } as T };
+        return { object: { reportMarkdown: 'No se pudo generar el informe debido a un error de análisis.' } as T };
       } else {
         throw new Error('Failed to parse JSON from model response');
       }
@@ -374,7 +373,7 @@ ${content}`;
     return res.object.summary;
   } catch (error) {
     logger.error('Error generating summary', { error });
-    return 'Failed to generate executive summary due to an error.';
+    return 'No se pudo generar el resumen ejecutivo debido a un error.';
   }
 }
 
@@ -401,7 +400,7 @@ export async function writeFinalReport({
 
     const citationsMarkdown = relevantUrls.length > 0
       ? relevantUrls.map(url => `- [${url}](${url})`).join('\n')
-      : 'No relevant URLs found.';
+      : 'No se encontraron URLs relevantes.';
 
     const promptText = `Executive Summary:
 ${executiveSummary}
@@ -415,10 +414,10 @@ ${citationsMarkdown}`;
     
     const res = await generateObjectSanitized({
       model: selectedModel ? createModel(selectedModel) : deepSeekModel,
-      system: reportPrompt(language),
+      system: reportPrompt(new Date().toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }), language || 'Spanish'),
       prompt: promptText,
       schema: z.object({
-        reportMarkdown: z.string().describe('Final report on the topic in Markdown format with escaped newlines'),
+        reportMarkdown: z.string().describe('Informe final sobre el tema en formato Markdown con saltos de línea explícitos'),
       }),
       temperature: 0.6,
       maxTokens: 8192,
@@ -429,8 +428,8 @@ ${citationsMarkdown}`;
     logger.error('Error generating final report', { error });
     const citationsMarkdown = relevantUrls.length > 0
       ? relevantUrls.map(url => `- ${url}`).join('\n')
-      : 'No relevant URLs found.';
-    return `# Research Report\n\nUser Input: ${prompt}\n\nKey Learnings:\n${learnings.join('\n')}\n\n## Citations:\n${citationsMarkdown}`;
+      : 'No se encontraron URLs relevantes.';
+    return `# Informe de Investigación\n\nEntrada del Usuario: ${prompt}\n\nAprendizajes Clave:\n${learnings.join('\n')}\n\n## Citas:\n${citationsMarkdown}`;
   }
 }
 
@@ -486,10 +485,10 @@ export async function deepResearch({
   abortSignal?: AbortSignal;
 }): Promise<ResearchResult> {
   logger.info('deepResearch started', { query, breadth, depth, selectedModel, sites });
-  progressCallback && progressCallback(`PROGRESS: Depth: ${depth}, Breadth: ${breadth}`);
+  progressCallback && progressCallback(`PROGRESO: Profundidad: ${depth}, Amplitud: ${breadth}`);
 
   if (abortSignal?.aborted) {
-    throw new Error('Research aborted by user');
+    throw new Error('Investigación abortada por el usuario');
   }
 
   const maxAllowedConcurrency = selectedModel ? getMaxConcurrency(selectedModel) : 1;
@@ -507,12 +506,12 @@ export async function deepResearch({
     serpQueries.map((serpQuery) =>
       requestLimit(async () => {
         if (abortSignal?.aborted) {
-          throw new Error('Research aborted by user');
+          throw new Error('Investigación abortada por el usuario');
         }
         try {
-          progressCallback && progressCallback(`Searching for "${serpQuery.query}"...`);
+          progressCallback && progressCallback(`Buscando "${serpQuery.query}"...`);
           const urls = await googleService.googleSearch(serpQuery.query, 10, sites);
-          progressCallback && progressCallback(`Found ${urls.length} results for "${serpQuery.query}". Processing...`);
+          progressCallback && progressCallback(`Encontrados ${urls.length} resultados para "${serpQuery.query}". Procesando...`);
           logger.info('Processing SERP result', { query: serpQuery.query, urlsCount: urls.length });
           const lowerSerpQuery = serpQuery.query.toLowerCase();
           const includeTopUrls =
@@ -525,7 +524,7 @@ export async function deepResearch({
             selectedModel,
             includeTopUrls,
           });
-          progressCallback && progressCallback(`Processed "${serpQuery.query}" and generated ${newLearnings.learnings.length} insights.`);
+          progressCallback && progressCallback(`Procesado "${serpQuery.query}" y generados ${newLearnings.learnings.length} aprendizajes.`);
           const allLearnings = [...learnings, ...newLearnings.learnings];
           const allUrls: string[] = [...visitedUrls, ...newLearnings.visitedUrls].filter(
             (u): u is string => u !== undefined,
@@ -535,7 +534,7 @@ export async function deepResearch({
           const newDepth = depth - 1;
           if (newDepth > 0) {
             logger.info('Researching deeper', { nextBreadth: Math.ceil(breadth / 2), nextDepth: newDepth });
-            progressCallback && progressCallback(`PROGRESS: Depth: ${newDepth}, Breadth: ${Math.ceil(breadth / 2)}`);
+            progressCallback && progressCallback(`PROGRESO: Profundidad: ${newDepth}, Amplitud: ${Math.ceil(breadth / 2)}`);
             const nextQuery = `
             Previous research goal: ${serpQuery.researchGoal}
             Follow-up research directions: ${newLearnings.followUpQuestions.map((q) => `\n${q}`).join('')}
@@ -609,9 +608,6 @@ export async function deepResearch({
   return finalResult;
 }
 
-// Note: The following `generateFeedback` function was not present in the original thinking trace's file
-// but is included here to ensure completeness based on common research file structures.
-// Remove or adjust if it’s not part of your actual codebase.
 import { generateObject } from 'ai';
 import { feedbackPrompt } from './feedback_prompt';
 
@@ -631,11 +627,11 @@ export async function generateFeedback({
 }): Promise<{ questions: string[]; language: string }> {
   const fallback: { questions: string[]; language: string } = {
     questions: [
-      'Could you provide more specific details about what you want to learn?',
-      'What is your main goal with this research?',
-      'Are there any specific aspects you want to focus on?',
+      '¿Podrías proporcionar más detalles específicos sobre lo que deseas aprender?',
+      '¿Cuál es tu objetivo principal con esta investigación?',
+      '¿Hay algún aspecto específico en el que quieras enfocarte?',
     ].slice(0, numQuestions),
-    language: 'English',
+    language: 'Spanish',
   };
 
   try {
@@ -643,25 +639,25 @@ export async function generateFeedback({
     const userFeedback = await generateObjectSanitized({
       model: selectedModel ? createModel(selectedModel) : deepSeekModel,
       system: feedbackPrompt(),
-      prompt: `Given the following query from the user, generate ${numQuestions} follow-up questions to clarify the research direction. Also, detect and return the language of the query. Format your response as a JSON object with two keys: "questions" (an array of questions) and "language" (a string representing the detected language).
+      prompt: `Dada la siguiente consulta del usuario, genera ${numQuestions} preguntas de seguimiento para aclarar la dirección de la investigación. También detecta y devuelve el idioma de la consulta. Formatea tu respuesta como un objeto JSON con dos claves: "questions" (un arreglo de preguntas) y "language" (una cadena que representa el idioma detectado).
 
-Query: "${query}"
+Consulta: "${query}"
 
-Example response format:
-{"questions": ["What specific aspects of this topic interest you most?", "Are you looking for current developments or historical context?", "What is your intended use case for this information?"], "language": "English"}`,
+Formato de respuesta de ejemplo:
+{"questions": ["¿Qué aspectos específicos de este tema te interesan más?", "¿Buscas desarrollos actuales o contexto histórico?", "¿Cuál es tu caso de uso previsto para esta información?"], "language": "Spanish"}`,
       schema: z.object({
-        questions: z.array(z.string()).min(1).max(numQuestions).describe('Follow up questions to clarify the research direction'),
-        language: z.string().describe('Detected language of the user query'),
+        questions: z.array(z.string()).min(1).max(numQuestions).describe('Preguntas de seguimiento para aclarar la dirección de la investigación'),
+        language: z.string().describe('Idioma detectado de la consulta del usuario'),
       }),
       maxTokens: 8192,
       temperature: 0.7,
     });
 
     const typedFeedback = userFeedback.object as FeedbackResponse;
-    logger.info('Feedback generated', { questions: typedFeedback.questions, language: typedFeedback.language });
+    logger.info('Feedback generado', { questions: typedFeedback.questions, language: typedFeedback.language });
     return { questions: typedFeedback.questions.slice(0, numQuestions), language: typedFeedback.language };
   } catch (error) {
-    logger.error('Error generating feedback', { error });
+    logger.error('Error generando feedback', { error });
     return fallback;
   }
 }
