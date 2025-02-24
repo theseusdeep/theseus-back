@@ -19,17 +19,15 @@ import {
   getResearchHistory,
 } from './db';
 import bcrypt from 'bcrypt';
-
 import showdown from 'showdown';
 import pdf from 'html-pdf';
+import { sendEmail } from './api/emailService';
 
 const converter = new showdown.Converter({
   tables: true,
   ghCompatibleHeaderId: true,
 });
 
-// Example styling to greatly improve visuals in the PDF
-// (fonts, headings, spacing, table styles, etc.)
 const customCSS = `
 <style>
   @page {
@@ -101,7 +99,6 @@ const pdfOptions = {
   },
 };
 
-// Global map to track ongoing research for abort support
 const ongoingResearch = new Map<string, AbortController>();
 
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -113,7 +110,6 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
 
 const app = express();
 
-// Updated middleware: skip logging preflight OPTIONS requests (Task 3)
 app.use((req: Request, res: Response, next: NextFunction): void => {
   if (req.method === 'OPTIONS') {
     return next();
@@ -236,8 +232,7 @@ app.get(
 app.post(
   '/api/research',
   asyncHandler(async (req: Request, res: Response) => {
-    const { query, breadth, depth, selectedModel, concurrency, sites, previousContext, language } =
-      req.body;
+    const { query, breadth, depth, selectedModel, concurrency, sites, previousContext, language, continuous, email } = req.body;
     const user = (req as any).user;
     const requester = user.username;
     const researchId = await createResearchRecord(requester, breadth, depth, query);
@@ -250,83 +245,99 @@ app.post(
       selectedModel,
       concurrency,
       sites,
+      continuous,
+      email,
     });
     res.json({ researchId });
 
-    // Create an AbortController for this research task (Task 7)
     const abortController = new AbortController();
     ongoingResearch.set(researchId, abortController);
 
     (async () => {
-      const startPrompt = logger.getTotalPromptTokens();
-      const startCompletion = logger.getTotalCompletionTokens();
+      let currentLearnings: string[] = previousContext ? (Array.isArray(previousContext) ? previousContext : [previousContext]) : [];
+      let iteration = 1;
 
-      const progressCallback = (msg: string) => {
-        logger.info('Research progress update', { researchId, msg });
-        updateResearchProgress(researchId, msg);
-      };
+      while (true) {
+        if (abortController.signal.aborted) {
+          updateResearchProgress(researchId, 'Research aborted by user.');
+          setResearchFinalReport(researchId, 'Research aborted by user.');
+          ongoingResearch.delete(researchId);
+          return;
+        }
 
-      try {
-        const previousLearnings = previousContext
-          ? Array.isArray(previousContext)
-            ? previousContext
-            : [previousContext]
-          : [];
-        const researchPromise = deepResearch({
-          query,
-          breadth,
-          depth,
-          learnings: previousLearnings,
-          selectedModel,
-          concurrency,
-          progressCallback,
-          sites,
-          abortSignal: abortController.signal,
-        });
-        const researchTimeoutMs = 15 * 60 * 1000; // 15 minutes
-        const fallbackResult = {
-          learnings: ['Fallback: Research timed out. Partial results may be incomplete.'],
-          visitedUrls: [],
-          topUrls: [],
+        const startPrompt = logger.getTotalPromptTokens();
+        const startCompletion = logger.getTotalCompletionTokens();
+
+        const progressCallback = (msg: string) => {
+          logger.info('Research progress update', { researchId, msg });
+          updateResearchProgress(researchId, msg);
         };
-        const { learnings, visitedUrls, topUrls } = await withTimeout(
-          researchPromise,
-          researchTimeoutMs,
-          fallbackResult,
-        );
 
-        const reportPromise = writeFinalReport({
-          prompt: query,
-          learnings,
-          visitedUrls,
-          selectedModel,
-          language,
-          topUrls,
-        });
-        const reportTimeoutMs = 5 * 60 * 1000; // 5 minutes
-        const fallbackReport = `# Research Report\n\nFallback report generated due to timeout. Learnings: ${learnings.join(
-          ', ',
-        )}`;
-        const report = await withTimeout(reportPromise, reportTimeoutMs, fallbackReport);
+        try {
+          const researchPromise = deepResearch({
+            query,
+            breadth,
+            depth,
+            learnings: currentLearnings,
+            selectedModel,
+            concurrency,
+            progressCallback,
+            sites,
+            abortSignal: abortController.signal,
+          });
+          const researchTimeoutMs = 15 * 60 * 1000; // 15 minutes
+          const fallbackResult = {
+            learnings: ['Fallback: Research timed out. Partial results may be incomplete.'],
+            visitedUrls: [],
+            topUrls: [],
+          };
+          const { learnings, visitedUrls, topUrls } = await withTimeout(
+            researchPromise,
+            researchTimeoutMs,
+            fallbackResult,
+          );
 
-        updateResearchProgress(researchId, `REPORT:${report}`);
-        setResearchFinalReport(researchId, report);
+          currentLearnings = learnings;
 
-        logger.info('Research completed successfully', { researchId });
-        const endPrompt = logger.getTotalPromptTokens();
-        const endCompletion = logger.getTotalCompletionTokens();
-        const diffPrompt = endPrompt - startPrompt;
-        const diffCompletion = endCompletion - startCompletion;
-        updateUserTokens(user.username, diffPrompt, diffCompletion);
-        updateResearchTokens(researchId, diffPrompt, diffCompletion);
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        updateResearchProgress(researchId, `ERROR:Research failed - ${errorMessage}`);
-        setResearchFinalReport(researchId, `ERROR:Research failed - ${errorMessage}`);
-        logger.error('Research failed', { researchId, error });
-      } finally {
-        // Remove from ongoing research once complete or errored.
-        ongoingResearch.delete(researchId);
+          const reportPromise = writeFinalReport({
+            prompt: query,
+            learnings,
+            visitedUrls,
+            selectedModel,
+            language,
+            topUrls,
+          });
+          const reportTimeoutMs = 5 * 60 * 1000; // 5 minutes
+          const fallbackReport = `# Research Report\n\nFallback report generated due to timeout. Learnings: ${learnings.join(', ')}`;
+          const report = await withTimeout(reportPromise, reportTimeoutMs, fallbackReport);
+
+          if (continuous) {
+            const subject = `Research Iteration ${iteration} for "${query}"`;
+            const htmlContent = converter.makeHtml(report);
+            await sendEmail(email, subject, htmlContent);
+            updateResearchProgress(researchId, `Iteration ${iteration} completed and emailed.`);
+            iteration++;
+          } else {
+            updateResearchProgress(researchId, `REPORT:${report}`);
+            setResearchFinalReport(researchId, report);
+            logger.info('Research completed successfully', { researchId });
+            const endPrompt = logger.getTotalPromptTokens();
+            const endCompletion = logger.getTotalCompletionTokens();
+            const diffPrompt = endPrompt - startPrompt;
+            const diffCompletion = endCompletion - startCompletion;
+            updateUserTokens(user.username, diffPrompt, diffCompletion);
+            updateResearchTokens(researchId, diffPrompt, diffCompletion);
+            ongoingResearch.delete(researchId);
+            break;
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          updateResearchProgress(researchId, `ERROR:Research failed - ${errorMessage}`);
+          setResearchFinalReport(researchId, `ERROR:Research failed - ${errorMessage}`);
+          logger.error('Research failed', { researchId, error });
+          ongoingResearch.delete(researchId);
+          break;
+        }
       }
     })();
   }),
@@ -358,7 +369,6 @@ app.get(
   }),
 );
 
-// New endpoint to abort research (Task 7)
 app.post(
   '/api/research/abort',
   asyncHandler(async (req: Request, res: Response) => {
@@ -371,7 +381,6 @@ app.post(
     if (controller) {
       controller.abort();
       ongoingResearch.delete(researchId);
-      // Optionally update research record to indicate it was aborted.
       updateResearchProgress(researchId, 'Research aborted by user.');
       setResearchFinalReport(researchId, 'Research aborted by user.');
       logger.info('Research aborted', { researchId });
@@ -397,7 +406,6 @@ app.post(
   }),
 );
 
-// NEW: Provide a more visually appealing PDF version of the final report
 app.get(
   '/api/research/pdf',
   authMiddleware,
@@ -416,9 +424,7 @@ app.get(
         .json({ error: 'No final report found for this research. Please complete it first.' });
     }
 
-    // Convert the final Markdown report to HTML
     const htmlContent = converter.makeHtml(researchRecord.report);
-    // Wrap in custom CSS to enhance visuals
     const finalHtml = `${customCSS}\n${htmlContent}`;
 
     pdf.create(finalHtml, pdfOptions).toBuffer((err, buffer) => {
