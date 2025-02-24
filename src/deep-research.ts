@@ -33,7 +33,7 @@ export interface ResearchResult {
   learnings: string[];
   visitedUrls: string[];
   topUrls: Array<{ url: string; description: string }>;
-  relevantUrls: string[]; // Added for Task 3
+  relevantUrls: string[];
 }
 
 export function sanitizeDeepSeekOutput(raw: string): string {
@@ -222,7 +222,7 @@ async function processSerpResult({
   const validResults = scrapedResults.filter(item => item.summary);
   const validContents = validResults.map(item => item.summary);
   const visitedUrls = validResults.map(item => item.url);
-  const relevantUrls = scrapedResults.filter(item => item.isQueryRelated).map(item => item.url); // Added for Task 3
+  const relevantUrls = scrapedResults.filter(item => item.isQueryRelated).map(item => item.url);
   logger.debug('processSerpResult valid URLs', { validUrls: visitedUrls });
   logger.info(`Ran "${query}", retrieved content for ${visitedUrls.length} URLs`, { visitedUrls });
 
@@ -309,7 +309,7 @@ Required JSON format:
       followUpQuestions: safeResult.followUpQuestions,
       visitedUrls: visitedUrls,
       topUrls: safeResult.topUrls && safeResult.topUrls.length > 0 ? safeResult.topUrls : computedTopUrls,
-      relevantUrls, // Added for Task 3
+      relevantUrls,
     };
   } catch (error) {
     logger.error('Error processing SERP result', { error });
@@ -326,7 +326,7 @@ Required JSON format:
       ].slice(0, numFollowUpQuestions),
       topUrls: [],
       visitedUrls: visitedUrls,
-      relevantUrls: [], // Added for Task 3
+      relevantUrls: [],
     };
   }
 }
@@ -362,7 +362,7 @@ export async function writeFinalReport({
   selectedModel,
   language,
   topUrls,
-  relevantUrls, // Added for Task 3
+  relevantUrls,
 }: {
   prompt: string;
   learnings: string[];
@@ -370,7 +370,7 @@ export async function writeFinalReport({
   selectedModel?: string;
   language?: string;
   topUrls?: Array<{ url: string; description: string }>;
-  relevantUrls: string[]; // Added for Task 3
+  relevantUrls: string[];
 }) {
   try {
     const combinedLearnings = learnings.join('\n');
@@ -503,7 +503,7 @@ export async function deepResearch({
             (u): u is string => u !== undefined,
           );
           const currentTopUrls = newLearnings.topUrls || [];
-          const allRelevantUrls = newLearnings.relevantUrls || []; // Added for Task 3
+          const allRelevantUrls = newLearnings.relevantUrls || [];
           const newDepth = depth - 1;
           if (newDepth > 0) {
             logger.info('Researching deeper', { nextBreadth: Math.ceil(breadth / 2), nextDepth: newDepth });
@@ -528,14 +528,14 @@ export async function deepResearch({
               learnings: deeperResult.learnings,
               visitedUrls: deeperResult.visitedUrls,
               topUrls: [...currentTopUrls, ...deeperResult.topUrls],
-              relevantUrls: [...allRelevantUrls, ...deeperResult.relevantUrls], // Added for Task 3
+              relevantUrls: [...allRelevantUrls, ...deeperResult.relevantUrls],
             };
           } else {
             return {
               learnings: allLearnings,
               visitedUrls: allUrls,
               topUrls: currentTopUrls,
-              relevantUrls: allRelevantUrls, // Added for Task 3
+              relevantUrls: allRelevantUrls,
             };
           }
         } catch (e) {
@@ -544,7 +544,7 @@ export async function deepResearch({
             learnings: [],
             visitedUrls: [],
             topUrls: [],
-            relevantUrls: [], // Added for Task 3
+            relevantUrls: [],
           };
         }
       })
@@ -557,7 +557,7 @@ export async function deepResearch({
   ];
   const allTopUrls = results.flatMap((r) => r.topUrls);
   const uniqueTopUrls = Array.from(new Map(allTopUrls.map((item) => [item.url, item])).values());
-  const allRelevantUrls = [...new Set(results.flatMap((r) => r.relevantUrls))]; // Added for Task 3
+  const allRelevantUrls = [...new Set(results.flatMap((r) => r.relevantUrls))];
 
   let finalTopUrls = uniqueTopUrls;
   if (finalTopUrls.length > 0) {
@@ -570,13 +570,13 @@ export async function deepResearch({
     learnings: allLearnings,
     visitedUrls: allVisitedUrls,
     topUrls: finalTopUrls,
-    relevantUrls: allRelevantUrls, // Added for Task 3
+    relevantUrls: allRelevantUrls,
   };
   logger.info('deepResearch completed', {
     learningsCount: finalResult.learnings.length,
     visitedUrlsCount: finalResult.visitedUrls.length,
     topUrlsCount: finalResult.topUrls.length,
-    relevantUrlsCount: finalResult.relevantUrls.length, // Added for Task 3
+    relevantUrlsCount: finalResult.relevantUrls.length,
   });
   return finalResult;
 }
@@ -585,7 +585,6 @@ import { generateObject } from 'ai';
 import { z } from 'zod';
 import { createModel, deepSeekModel } from './ai/providers';
 import { feedbackPrompt } from './feedback_prompt';
-import { generateObjectSanitized } from './deep-research';
 import { logger } from './api/utils/logger';
 
 interface FeedbackResponse {
