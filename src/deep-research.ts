@@ -68,6 +68,24 @@ export async function generateObjectSanitized<T>(params: any): Promise<{ object:
       throw new Error('No response text received from Venice API');
     }
     logger.debug('Raw text from Venice API', { rawText: rawText.substring(0, 300) });
+
+    // Try to extract the first valid JSON object
+    const jsonMatch = rawText.match(/\{[\s\S]*?\}/);
+    if (jsonMatch) {
+      const candidate = jsonMatch[0];
+      try {
+        const parsed = JSON.parse(candidate);
+        if (params.schema) {
+          params.schema.parse(parsed); // Validate with Zod schema if provided
+        }
+        logger.debug('Parsed JSON from response', { parsed });
+        return { object: parsed };
+      } catch (error) {
+        logger.error('Error parsing or validating JSON from response', { error, candidate });
+      }
+    }
+
+    // Fallback to existing sanitization logic
     const sanitized = sanitizeDeepSeekOutput(rawText);
     logger.debug('Sanitized text', {
       snippet: sanitized.substring(0, 200),
@@ -75,6 +93,9 @@ export async function generateObjectSanitized<T>(params: any): Promise<{ object:
     });
     try {
       const parsed = JSON.parse(sanitized);
+      if (params.schema) {
+        params.schema.parse(parsed);
+      }
       logger.debug('Parsed sanitized output', { parsed });
       return { object: parsed };
     } catch (error: any) {
@@ -88,6 +109,9 @@ export async function generateObjectSanitized<T>(params: any): Promise<{ object:
         const repaired = sanitized.substring(0, lastIndex + 1);
         try {
           const parsed = JSON.parse(repaired);
+          if (params.schema) {
+            params.schema.parse(parsed);
+          }
           logger.debug('Parsed repaired sanitized output', { parsed });
           return { object: parsed };
         } catch (repairError: any) {
@@ -337,7 +361,10 @@ export async function generateSummary(content: string, selectedModel?: string): 
     return '';
   }
   try {
-    const promptText = `Return your answer as a valid JSON object with a single key "summary". Do not include any extra text. Required JSON format: {"summary": "Your executive summary in bullet points."}`;
+    const promptText = `Based on the following research learnings, generate an executive summary in bullet points. Each bullet point should be a concise statement. Return your answer as a valid JSON object with a single key "summary", where the value is a string containing the bullet points separated by newlines. Do not include any extra text outside the JSON object. For example: {"summary": "- First key insight\\n- Second key insight\\n- Third key insight"}
+
+Research Learnings:
+${content}`;
     const res = await generateObjectSanitized({
       model: selectedModel ? createModel(selectedModel) : summarizationModel,
       system: systemPrompt(),
@@ -361,8 +388,8 @@ export async function writeFinalReport({
   visitedUrls,
   selectedModel,
   language,
-  topUrls,
-  relevantUrls,
+  topUrls = [], // Default value for optional parameter
+  relevantUrls = [], // Default to empty array to prevent TypeError
 }: {
   prompt: string;
   learnings: string[];
@@ -370,7 +397,7 @@ export async function writeFinalReport({
   selectedModel?: string;
   language?: string;
   topUrls?: Array<{ url: string; description: string }>;
-  relevantUrls: string[];
+  relevantUrls?: string[]; // Made optional with default value
 }) {
   try {
     const combinedLearnings = learnings.join('\n');
@@ -402,7 +429,7 @@ ${citationsMarkdown}`;
     return safeResult.reportMarkdown.replace(/\\n/g, '\n');
   } catch (error) {
     logger.error('Error generating final report', { error });
-    return `# Research Report\n\nUser Input: ${prompt}\n\nKey Learnings:\n${learnings.join('\n')}\n\n## Citations:\n${relevantUrls.map(url => `- ${url}`).join('\n')}`; // Updated for Task 3
+    return `# Research Report\n\nUser Input: ${prompt}\n\nKey Learnings:\n${learnings.join('\n')}\n\n## Citations:\n${relevantUrls.map(url => `- ${url}`).join('\n')}`;
   }
 }
 
