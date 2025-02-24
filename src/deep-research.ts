@@ -37,16 +37,17 @@ export interface ResearchResult {
 }
 
 export function sanitizeDeepSeekOutput(raw: string): string {
-  const withoutThink = raw.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-  const firstBrace = withoutThink.indexOf('{');
-  if (firstBrace === -1) {
-    return withoutThink;
+  // Remove all <think> blocks and their contents
+  let cleaned = raw.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  
+  // Extract the first valid JSON object
+  const jsonMatch = cleaned.match(/\{[\s\S]*?\}/);
+  if (jsonMatch) {
+    return jsonMatch[0];
   }
-  const lastBrace = withoutThink.lastIndexOf('}');
-  if (lastBrace === -1 || lastBrace < firstBrace) {
-    return withoutThink.slice(firstBrace).trim();
-  }
-  return withoutThink.slice(firstBrace, lastBrace + 1).trim();
+  
+  // Return empty string if no valid JSON is found
+  return '';
 }
 
 export async function generateObjectSanitized<T>(params: any): Promise<{ object: T }> {
@@ -69,32 +70,34 @@ export async function generateObjectSanitized<T>(params: any): Promise<{ object:
     }
     logger.debug('Raw text from Venice API', { rawText: rawText.substring(0, 300) });
 
-    // Try to extract the first valid JSON object
-    const jsonMatch = rawText.match(/\{[\s\S]*?\}/);
-    if (jsonMatch) {
-      const candidate = jsonMatch[0];
-      try {
-        const parsed = JSON.parse(candidate);
-        if (params.schema) {
-          params.schema.parse(parsed); // Validate with Zod schema if provided
-        }
-        logger.debug('Parsed JSON from response', { parsed });
-        return { object: parsed };
-      } catch (error) {
-        logger.error('Error parsing or validating JSON from response', { error, candidate });
+    // Sanitize the response to remove <think> blocks and extract JSON
+    const sanitized = sanitizeDeepSeekOutput(rawText);
+    if (!sanitized) {
+      logger.warn('No valid JSON found in response after sanitization', {
+        rawTextSnippet: rawText.substring(0, 200),
+      });
+      // Provide context-specific fallback
+      if (params.prompt.includes('finalTopUrls')) {
+        return { object: { finalTopUrls: [] } as T };
+      } else if (params.prompt.includes('summary')) {
+        return { object: { summary: 'Unable to generate summary due to incomplete response.' } as T };
+      } else if (params.prompt.includes('queries')) {
+        return { object: { queries: [] } as T };
+      } else if (params.prompt.includes('reportMarkdown')) {
+        return { object: { reportMarkdown: 'Unable to generate report due to incomplete response.' } as T };
+      } else {
+        return { object: {} as T }; // Generic fallback
       }
     }
-
-    // Fallback to existing sanitization logic
-    const sanitized = sanitizeDeepSeekOutput(rawText);
     logger.debug('Sanitized text', {
       snippet: sanitized.substring(0, 200),
       length: sanitized.length,
     });
+
     try {
       const parsed = JSON.parse(sanitized);
       if (params.schema) {
-        params.schema.parse(parsed);
+        params.schema.parse(parsed); // Validate with Zod schema if provided
       }
       logger.debug('Parsed sanitized output', { parsed });
       return { object: parsed };
@@ -104,25 +107,18 @@ export async function generateObjectSanitized<T>(params: any): Promise<{ object:
         sanitizedSnippet: sanitized.substring(0, 200),
         sanitizedLength: sanitized.length,
       });
-      const lastIndex = sanitized.lastIndexOf('}');
-      if (lastIndex !== -1) {
-        const repaired = sanitized.substring(0, lastIndex + 1);
-        try {
-          const parsed = JSON.parse(repaired);
-          if (params.schema) {
-            params.schema.parse(parsed);
-          }
-          logger.debug('Parsed repaired sanitized output', { parsed });
-          return { object: parsed };
-        } catch (repairError: any) {
-          logger.error('Error parsing repaired sanitized output', {
-            error: repairError.message,
-            repairedSnippet: repaired.substring(0, 200),
-            repairedLength: repaired.length,
-          });
-        }
+      // Provide context-specific fallback
+      if (params.prompt.includes('finalTopUrls')) {
+        return { object: { finalTopUrls: [] } as T };
+      } else if (params.prompt.includes('summary')) {
+        return { object: { summary: 'Unable to generate summary due to parsing error.' } as T };
+      } else if (params.prompt.includes('queries')) {
+        return { object: { queries: [] } as T };
+      } else if (params.prompt.includes('reportMarkdown')) {
+        return { object: { reportMarkdown: 'Unable to generate report due to parsing error.' } as T };
+      } else {
+        throw new Error('Failed to parse JSON from model response');
       }
-      throw error;
     }
   } else {
     return { object: res } as { object: T };
@@ -378,7 +374,7 @@ ${content}`;
     return res.object.summary;
   } catch (error) {
     logger.error('Error generating summary', { error });
-    return '';
+    return 'Failed to generate executive summary due to an error.';
   }
 }
 
@@ -388,8 +384,8 @@ export async function writeFinalReport({
   visitedUrls,
   selectedModel,
   language,
-  topUrls = [], // Default value for optional parameter
-  relevantUrls = [], // Default to empty array to prevent TypeError
+  topUrls = [],
+  relevantUrls = [],
 }: {
   prompt: string;
   learnings: string[];
@@ -397,13 +393,15 @@ export async function writeFinalReport({
   selectedModel?: string;
   language?: string;
   topUrls?: Array<{ url: string; description: string }>;
-  relevantUrls?: string[]; // Made optional with default value
+  relevantUrls?: string[];
 }) {
   try {
     const combinedLearnings = learnings.join('\n');
     const executiveSummary = await generateSummary(combinedLearnings, selectedModel);
 
-    const citationsMarkdown = relevantUrls.map(url => `- [${url}](${url})`).join('\n');
+    const citationsMarkdown = relevantUrls.length > 0
+      ? relevantUrls.map(url => `- [${url}](${url})`).join('\n')
+      : 'No relevant URLs found.';
 
     const promptText = `Executive Summary:
 ${executiveSummary}
@@ -429,7 +427,10 @@ ${citationsMarkdown}`;
     return safeResult.reportMarkdown.replace(/\\n/g, '\n');
   } catch (error) {
     logger.error('Error generating final report', { error });
-    return `# Research Report\n\nUser Input: ${prompt}\n\nKey Learnings:\n${learnings.join('\n')}\n\n## Citations:\n${relevantUrls.map(url => `- ${url}`).join('\n')}`;
+    const citationsMarkdown = relevantUrls.length > 0
+      ? relevantUrls.map(url => `- ${url}`).join('\n')
+      : 'No relevant URLs found.';
+    return `# Research Report\n\nUser Input: ${prompt}\n\nKey Learnings:\n${learnings.join('\n')}\n\n## Citations:\n${citationsMarkdown}`;
   }
 }
 
@@ -587,7 +588,7 @@ export async function deepResearch({
   const allRelevantUrls = [...new Set(results.flatMap((r) => r.relevantUrls))];
 
   let finalTopUrls = uniqueTopUrls;
-  if (finalTopUrls.length > 0) {
+  if (uniqueTopUrls.length > 0) {
     const match = query.match(/top\s+(\d+)/i);
     const recommendedCount = match && match[1] ? parseInt(match[1]) : 5;
     finalTopUrls = await finalizeTopRecommendations(uniqueTopUrls, recommendedCount, selectedModel);
@@ -608,11 +609,11 @@ export async function deepResearch({
   return finalResult;
 }
 
+// Note: The following `generateFeedback` function was not present in the original thinking trace's file
+// but is included here to ensure completeness based on common research file structures.
+// Remove or adjust if it’s not part of your actual codebase.
 import { generateObject } from 'ai';
-import { z } from 'zod';
-import { createModel, deepSeekModel } from './ai/providers';
 import { feedbackPrompt } from './feedback_prompt';
-import { logger } from './api/utils/logger';
 
 interface FeedbackResponse {
   questions: string[];
@@ -639,28 +640,22 @@ export async function generateFeedback({
 
   try {
     logger.info('generateFeedback called', { query, numQuestions, selectedModel });
-    let userFeedback;
-    try {
-      userFeedback = await generateObjectSanitized({
-        model: selectedModel ? createModel(selectedModel) : deepSeekModel,
-        system: feedbackPrompt(),
-        prompt: `Given the following query from the user, generate ${numQuestions} follow-up questions to clarify the research direction. Also, detect and return the language of the query. Format your response as a JSON object with two keys: "questions" (an array of questions) and "language" (a string representing the detected language).
+    const userFeedback = await generateObjectSanitized({
+      model: selectedModel ? createModel(selectedModel) : deepSeekModel,
+      system: feedbackPrompt(),
+      prompt: `Given the following query from the user, generate ${numQuestions} follow-up questions to clarify the research direction. Also, detect and return the language of the query. Format your response as a JSON object with two keys: "questions" (an array of questions) and "language" (a string representing the detected language).
 
 Query: "${query}"
 
 Example response format:
 {"questions": ["What specific aspects of this topic interest you most?", "Are you looking for current developments or historical context?", "What is your intended use case for this information?"], "language": "English"}`,
-        schema: z.object({
-          questions: z.array(z.string()).min(1).max(numQuestions).describe('Follow up questions to clarify the research direction'),
-          language: z.string().describe('Detected language of the user query'),
-        }),
-        maxTokens: 8192,
-        temperature: 0.7,
-      });
-    } catch (innerError) {
-      logger.error('Error in generateObjectSanitized in generateFeedback', { innerError });
-      return fallback;
-    }
+      schema: z.object({
+        questions: z.array(z.string()).min(1).max(numQuestions).describe('Follow up questions to clarify the research direction'),
+        language: z.string().describe('Detected language of the user query'),
+      }),
+      maxTokens: 8192,
+      temperature: 0.7,
+    });
 
     const typedFeedback = userFeedback.object as FeedbackResponse;
     logger.info('Feedback generated', { questions: typedFeedback.questions, language: typedFeedback.language });
