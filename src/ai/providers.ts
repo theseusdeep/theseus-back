@@ -52,6 +52,11 @@ function VeniceAI(model: string, options: any = {}) {
       messages,
     };
 
+    if (!VENICE_API_KEY) {
+      logger.error('VENICE_API_KEY is not set');
+      throw new Error('VENICE_API_KEY is not set');
+    }
+
     logger.debug('Calling VeniceAI API', { model, body });
     const response = await fetch(`${BASE_URL}/chat/completions`, {
       method: 'POST',
@@ -61,6 +66,26 @@ function VeniceAI(model: string, options: any = {}) {
       },
       body: JSON.stringify(body)
     });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.error('VeniceAI API returned an error', {
+        status: response.status,
+        statusText: response.statusText,
+        errorText,
+      });
+      throw new Error(`VeniceAI API error: ${response.status} ${response.statusText}`);
+    }
+
+    const contentType = response.headers.get('Content-Type');
+    if (!contentType || !contentType.includes('application/json')) {
+      const errorText = await response.text();
+      logger.error('VeniceAI API returned non-JSON response', {
+        contentType,
+        errorText,
+      });
+      throw new Error('VeniceAI API returned non-JSON response');
+    }
 
     const jsonResponse = await response.json();
     if (jsonResponse && jsonResponse.usage) {
