@@ -7,7 +7,7 @@ const enhancedCSS = `<style>
     size: A4;
   }
   body {
-    font-family: 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
     color: #444;
     line-height: 1.8;
     margin: 0;
@@ -16,7 +16,6 @@ const enhancedCSS = `<style>
     background-color: #fff;
   }
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Montserrat', sans-serif;
     margin-top: 0;
     line-height: 1.2;
     color: #2C3E50;
@@ -74,7 +73,7 @@ const enhancedCSS = `<style>
     color: #555;
   }
   code {
-    font-family: 'Courier New', Courier, monospace;
+    font-family: "Courier New", Courier, monospace;
     background-color: #f4f4f4;
     padding: 4px;
     border-radius: 4px;
@@ -85,7 +84,7 @@ const enhancedCSS = `<style>
     padding: 15px;
     border-radius: 6px;
     overflow-x: auto;
-    font-family: 'Courier New', Courier, monospace;
+    font-family: "Courier New", Courier, monospace;
     font-size: 10pt;
     margin: 20px 0;
     border: 1px solid #e0e0e0;
