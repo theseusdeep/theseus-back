@@ -19,85 +19,8 @@ import {
   getResearchHistory,
 } from './db';
 import bcrypt from 'bcrypt';
-import showdown from 'showdown';
-import pdf from 'html-pdf';
 import { sendEmail } from './api/emailService';
-
-const converter = new showdown.Converter({
-  tables: true,
-  ghCompatibleHeaderId: true,
-});
-
-const customCSS = `
-<style>
-  @page {
-    margin: 40px;
-  }
-  body {
-    font-family: Arial, sans-serif;
-    color: #333333;
-    line-height: 1.5;
-    margin: 0;
-    padding: 0;
-  }
-  h1 {
-    color: #2c3e50;
-    text-align: center;
-    font-size: 28px;
-    margin-bottom: 20px;
-    margin-top: 0;
-  }
-  h2 {
-    color: #34495e;
-    font-size: 22px;
-    margin-top: 30px;
-    margin-bottom: 10px;
-  }
-  h3 {
-    font-size: 18px;
-    margin-top: 24px;
-    margin-bottom: 8px;
-  }
-  p {
-    margin-bottom: 12px;
-  }
-  ul, ol {
-    margin: 0 0 12px 30px;
-  }
-  li {
-    margin-bottom: 6px;
-  }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-bottom: 20px;
-  }
-  th, td {
-    border: 1px solid #ccc;
-    padding: 8px;
-  }
-  th {
-    background-color: #f8f8f8;
-  }
-  blockquote {
-    border-left: 4px solid #ccc;
-    padding-left: 12px;
-    color: #555;
-    margin: 20px 0;
-  }
-</style>
-`;
-
-const pdfOptions = {
-  format: 'A4',
-  border: '0.6in',
-  footer: {
-    height: '15mm',
-    contents: {
-      default: '<span style="color: #666; font-size: 12px;">Page {{page}} of {{pages}}</span>',
-    },
-  },
-};
+import { generatePDF } from './generatePDF';
 
 const ongoingResearch = new Map<string, AbortController>();
 
@@ -313,8 +236,8 @@ app.post(
 
           if (continuous) {
             const subject = `Research Iteration ${iteration} for "${query}"`;
-            const htmlContent = converter.makeHtml(report);
-            await sendEmail(email, subject, htmlContent);
+            // For continuous mode, the report is emailed directly
+            await sendEmail(email, subject, report);
             updateResearchProgress(researchId, `Iteration ${iteration} completed and emailed.`);
             iteration++;
           } else {
@@ -419,26 +342,26 @@ app.get(
       return res.status(404).json({ error: 'Research record not found' });
     }
     if (!researchRecord.report) {
-      return res
-        .status(400)
-        .json({ error: 'No final report found for this research. Please complete it first.' });
+      return res.status(400).json({ error: 'No final report found for this research. Please complete it first.' });
     }
 
-    const htmlContent = converter.makeHtml(researchRecord.report);
-    const finalHtml = `${customCSS}\n${htmlContent}`;
+    try {
+      const reportTitle = researchRecord.query || 'Research Report';
+      const pdfBuffer = await generatePDF(reportTitle, researchRecord.report, researchId);
 
-    pdf.create(finalHtml, pdfOptions).toBuffer((err, buffer) => {
-      if (err) {
-        logger.error('Error generating PDF', { error: err });
-        return res.status(500).json({ error: 'Failed to generate PDF' });
-      }
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const sanitizedTitle = reportTitle.replace(/[^a-zA-Z0-9]/g, '-').substring(0, 30);
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader(
-        'Content-Disposition',
-        `attachment; filename="research-report-${researchId}.pdf"`,
-      );
-      res.send(buffer);
-    });
+      res.setHeader('Content-Disposition', `attachment; filename="${sanitizedTitle}-${timestamp}.pdf"`);
+      res.send(pdfBuffer);
+      logger.info('PDF generated successfully', { researchId });
+    } catch (error) {
+      logger.error('Error generating PDF', { error, researchId });
+      return res.status(500).json({ 
+        error: 'Failed to generate PDF', 
+        details: error instanceof Error ? error.message : 'Unknown error' 
+      });
+    }
   }),
 );
 
