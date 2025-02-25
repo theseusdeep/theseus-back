@@ -241,11 +241,11 @@ async function processSerpResult({
   const validResults = scrapedResults.filter(item => item.summary);
   const validContents = validResults.map(item => item.summary);
   const visitedUrls = validResults.map(item => item.url);
-  const relevantUrls = scrapedResults.filter(item => item.isQueryRelated).map(item => item.url);
+  const relevantUrls = scrapedResults.filter(item => item.IsQueryRelated === true).map(item => item.url);
   logger.debug('processSerpResult valid URLs', { validUrls: visitedUrls });
   logger.info(`Ran "${query}", retrieved content for ${visitedUrls.length} URLs`, { visitedUrls });
 
-  const flaggedResults = scrapedResults.filter(item => item.isQueryRelated);
+  const flaggedResults = scrapedResults.filter(item => item.IsQueryRelated === true);
   const computedTopUrls = flaggedResults.map(item => ({
     url: item.url,
     description: item.summary || '',
@@ -254,10 +254,10 @@ async function processSerpResult({
   try {
     let trimmedContents = validContents.join('\n\n');
     let promptText = `Conduct a rigorous and scholarly analysis of the following search results for "${query}". Generate ${numLearnings} key insights and ${numFollowUpQuestions} thought‑provoking follow‑up questions that are deeply grounded in current research trends and critical evaluation.${includeTopUrls ? ' Also, identify candidate top recommendations with clear, evidence‑based justification.' : ''}
-    
+
 Search Results:
 ${trimmedContents}
-    
+
 Required JSON format:
 {
   "learnings": [
@@ -282,10 +282,10 @@ Required JSON format:
       logger.warn(`Prompt too long (${tokenCount} tokens), trimming to ${trimSize} per content...`);
       const reTrimmed = validContents.map((content) => trimPrompt(content ?? '', trimSize)).join('\n\n');
       promptText = `Conduct a rigorous and scholarly analysis of the following search results for "${query}". Generate ${numLearnings} key insights and ${numFollowUpQuestions} thought‑provoking follow‑up questions that are deeply grounded in current research trends and critical evaluation.${includeTopUrls ? ' Also, identify candidate top recommendations with clear, evidence‑based justification.' : ''}
-    
+
 Search Results:
 ${reTrimmed}
-    
+
 Required JSON format:
 {
   "learnings": [
