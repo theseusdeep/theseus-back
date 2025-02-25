@@ -398,19 +398,13 @@ export async function writeFinalReport({
     const combinedLearnings = learnings.join('\n');
     const executiveSummary = await generateSummary(combinedLearnings, selectedModel);
 
-    const citationsMarkdown = relevantUrls.length > 0
-      ? relevantUrls.map(url => `- [${url}](${url})`).join('\n')
-      : 'No se encontraron URLs relevantes.';
-
+    // Build the main report prompt without a citations section.
     const promptText = `Executive Summary:
 ${executiveSummary}
 
 User Input: "${prompt}"
 Research Learnings:
-${learnings.join('\n')}
-
-## Citations:
-${citationsMarkdown}`;
+${learnings.join('\n')}`;
     
     const res = await generateObjectSanitized({
       model: selectedModel ? createModel(selectedModel) : deepSeekModel,
@@ -423,13 +417,14 @@ ${citationsMarkdown}`;
       maxTokens: 8192,
     });
     const safeResult = res.object as { reportMarkdown: string };
-    return safeResult.reportMarkdown.replace(/\\n/g, '\n');
+
+    // Append the visited URLs section as the sources for the report.
+    const urlsSection = `\n\n## Sources\n\n${visitedUrls.map(url => `- ${url}`).join('\n')}`;
+    return safeResult.reportMarkdown.replace(/\\n/g, '\n') + urlsSection;
   } catch (error) {
     logger.error('Error generating final report', { error });
-    const citationsMarkdown = relevantUrls.length > 0
-      ? relevantUrls.map(url => `- ${url}`).join('\n')
-      : 'No se encontraron URLs relevantes.';
-    return `# Informe de Investigación\n\nEntrada del Usuario: ${prompt}\n\nAprendizajes Clave:\n${learnings.join('\n')}\n\n## Citas:\n${citationsMarkdown}`;
+    const urlsSection = `\n\n## Sources\n\n${visitedUrls.map(url => `- ${url}`).join('\n')}`;
+    return `# Informe de Investigación\n\nEntrada del Usuario: ${prompt}\n\nAprendizajes Clave:\n${learnings.join('\n')}\n\n## Citas:\n${urlsSection}`;
   }
 }
 
