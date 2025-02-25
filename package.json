@@ -24,8 +24,8 @@
     "cloudflare-scraper": "^2.0.0",
     "tsx": "^4.19.2",
     "cors": "^2.8.5",
-    "html-pdf": "^3.0.1",
-    "showdown": "^2.1.0"
+    "showdown": "^2.1.0",
+    "puppeteer": "^24.3.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
