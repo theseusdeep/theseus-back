@@ -21,7 +21,7 @@ Theseus DeepDive is an advanced AI‑powered research assistant that performs it
   - Includes a built‑in rate limiter to control request bursts.
 
 - **External Integrations:**  
-  - **Google Search & Web Scraping:** Connects to an external API ([google‑twitter‑scraper.vercel.app](https://google-twitter-scraper.vercel.app)) with automatic fallback on bulk timeouts.  
+  - **Google Search & Web Scraping:** Connects to an external API with automatic fallback on bulk timeouts.  
   - **2Captcha Support:** (`TWOCAPTCHA_API_KEY`) is available for captcha solving, if needed in the future.
 
 - **Database Integration:**  
