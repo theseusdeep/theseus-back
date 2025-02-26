@@ -161,6 +161,14 @@ const enhancedCSS = `<style>
   }
 </style>`;
 
+const headerTemplate = `<div style="font-size:12pt; text-align:center; width:100%; border-bottom:1px solid #bdc3c7; padding-bottom:5px;">
+  Theseus Deep Research Report
+</div>`;
+
+const footerTemplate = `<div style="font-size:10pt; text-align:center; width:100%; border-top:1px solid #bdc3c7; padding-top:5px; margin-top:5px;">
+  Page <span class="pageNumber"></span> of <span class="totalPages"></span>
+</div>`;
+
 export const generatePDF = async (reportTitle: string, reportMarkdown: string, researchId: string): Promise<Buffer> => {
   const converter = new showdown.Converter({
     tables: true,
@@ -181,54 +189,8 @@ export const generatePDF = async (reportTitle: string, reportMarkdown: string, r
     </div>
   `;
 
-  // Table of Contents script with a completion flag
-  const headerFooterScript = `
-<script>
-  document.addEventListener('DOMContentLoaded', function() {
-    const headings = document.querySelectorAll('h1, h2, h3');
-    if (headings.length > 3) {
-      const toc = document.createElement('div');
-      toc.className = 'toc';
-      const tocTitle = document.createElement('div');
-      tocTitle.className = 'toc-title';
-      tocTitle.textContent = 'Table of Contents';
-      toc.appendChild(tocTitle);
-      const tocList = document.createElement('ul');
-      let currentList = tocList;
-      let prevLevel = 1;
-      headings.forEach((heading, index) => {
-        if (index === 0) return;
-        const level = parseInt(heading.tagName.substring(1));
-        const listItem = document.createElement('li');
-        const link = document.createElement('a');
-        if (!heading.id) {
-          heading.id = 'toc-heading-' + index;
-        }
-        link.href = '#' + heading.id;
-        link.textContent = heading.textContent;
-        listItem.appendChild(link);
-        if (level > prevLevel) {
-          const nestedList = document.createElement('ul');
-          currentList.lastElementChild.appendChild(nestedList);
-          currentList = nestedList;
-        } else if (level < prevLevel) {
-          for (let i = 0; i < (prevLevel - level); i++) {
-            currentList = currentList.parentElement.parentElement;
-          }
-        }
-        currentList.appendChild(listItem);
-        prevLevel = level;
-      });
-      toc.appendChild(tocList);
-      const firstHeading = document.querySelector('h1');
-      if (firstHeading && firstHeading.nextElementSibling) {
-        firstHeading.parentElement.insertBefore(toc, firstHeading.nextElementSibling);
-      }
-    }
-    window.tocGenerated = true;
-  });
-</script>
-`;
+  // Create table of contents placeholder if the report is large
+  const toc = reportMarkdown.length > 1000 ? `<div id="toc-placeholder"></div>` : '';
 
   const finalHtml = `
     <!DOCTYPE html>
@@ -241,45 +203,39 @@ export const generatePDF = async (reportTitle: string, reportMarkdown: string, r
     <body>
       ${metadata}
       ${htmlContent}
-      ${headerFooterScript}
+      ${toc}
     </body>
     </html>
   `;
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  });
-  const page = await browser.newPage();
-
-  // Log console messages for debugging
-  page.on('console', msg => console.log('PAGE LOG:', msg.text()));
-
-  await page.setContent(finalHtml, { waitUntil: 'networkidle0' });
-
-  // Wait for TOC generation, with a fallback
+  let browser;
   try {
-    await page.waitForFunction('window.tocGenerated === true', { timeout: 10000 });
-  } catch (error) {
-    console.warn('TOC generation timed out, proceeding without TOC.');
+    browser = await puppeteer.launch({
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
+    const page = await browser.newPage();
+    await page.setContent(finalHtml, { waitUntil: 'networkidle0' });
+    // Ensure additional resources (fonts/images) are loaded
+    await page.waitForTimeout(1000);
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: {
+        top: '25mm',
+        right: '20mm',
+        bottom: '25mm',
+        left: '20mm',
+      },
+      displayHeaderFooter: true,
+      headerTemplate: headerTemplate,
+      footerTemplate: footerTemplate,
+    });
+    return pdfBuffer as Buffer;
+  } catch (err) {
+    throw err;
+  } finally {
+    if (browser) {
+      await browser.close();
+    }
   }
-
-  const pdfBuffer = await page.pdf({
-    format: 'A4',
-    printBackground: true,
-    margin: {
-      top: '25mm',
-      right: '20mm',
-      bottom: '25mm',
-      left: '20mm',
-    },
-    displayHeaderFooter: true,
-    headerTemplate: '<div style="font-size: 9pt; width: 100%; text-align: center; color: #95a5a6; border-bottom: 1px solid #bdc3c7; padding-bottom: 5px;">Theseus Deep Research Report</div>',
-    footerTemplate: '<div style="font-size: 9pt; width: 100%; text-align: center; color: #95a5a6; border-top: 1px solid #bdc3c7; padding-top: 5px;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>',
-    timeout: 120000,
-  });
-
-  await browser.close();
-
-  return pdfBuffer;
 };
