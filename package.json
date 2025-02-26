@@ -5,7 +5,7 @@
   "scripts": {
     "format": "prettier --write \"src/**/*.{ts,tsx}\"",
     "dev": "tsx src/server.ts",
-    "baml:generate": "baml-cli generate"
+    "baml:generate": "baml-cli generate --config baml.yaml"
   },
   "dependencies": {
     "@boundaryml/baml": "^0.77.0",
