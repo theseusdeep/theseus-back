@@ -1,8 +1,7 @@
 chromium-bsu
-chromium-common
 chromium-sandbox
 ca-certificates
-fonts-liberation
+fonts-liberic
 libappindicator3-1
 libasound2
 libatk-bridge2.0-0
