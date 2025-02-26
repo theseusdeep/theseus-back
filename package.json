@@ -4,8 +4,7 @@
   "main": "src/server.ts",
   "scripts": {
     "format": "prettier --write \"src/**/*.{ts,tsx}\"",
-    "dev": "tsx src/server.ts",
-    "postinstall": "npx puppeteer browsers install"
+    "dev": "tsx src/server.ts"
   },
   "dependencies": {
     "express": "^4.21.2",
@@ -26,7 +25,8 @@
     "tsx": "^4.19.2",
     "cors": "^2.8.5",
     "showdown": "^2.1.0",
-    "puppeteer": "^24.3.0"
+    "puppeteer": "^24.3.0",
+    "chromium": "^3.0.3"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
