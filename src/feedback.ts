@@ -1,4 +1,4 @@
-import { b } from 'baml_client'; // Import BAML client
+import { b } from 'baml_client';
 import { logger } from './api/utils/logger';
 
 interface FeedbackResponse {
@@ -26,7 +26,16 @@ export async function generateFeedback({
 
   try {
     logger.info('generateFeedback called', { query, numQuestions, selectedModel });
-    const feedback = await b.GenerateFeedback({ query, numQuestions });
+    // Determine the client name based on the selected model
+    function getClientName(selectedModel?: string): string {
+      const modelToClientMap: Record<string, string> = {
+        'deepseek-r1-671b': 'DeepSeekClient',
+        'gpt-4o': 'GPT4Client',
+      };
+      return selectedModel ? modelToClientMap[selectedModel] || 'DeepSeekClient' : 'DeepSeekClient';
+    }
+    const clientName = getClientName(selectedModel);
+    const feedback = await b.GenerateFeedback.withClient(clientName)(query, numQuestions);
     logger.info('Feedback generated', { questions: feedback.questions, language: feedback.language });
     return { questions: feedback.questions.slice(0, numQuestions), language: feedback.language };
   } catch (error) {
