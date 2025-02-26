@@ -55,7 +55,7 @@ function GenerateSerpQueries(query: string, numQueries: int, learnings: string[]
         {% if learnings | length > 0 %}
         Previous insights:
         {{ learnings | join('\n') }}
-        {{ endif }}
+        {% endif %}
         Ensure that the queries are directly aligned with the user's original intent and any provided feedback.
         
         {{ ctx.output_format }}
