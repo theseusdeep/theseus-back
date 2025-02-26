@@ -17,13 +17,6 @@ client GPT4Client {
     }
 }
 
-// Register clients for dynamic selection
-clientRegistry MyClients {
-    DeepSeekClient
-    GPT4Client
-    // Add more clients as needed
-}
-
 // Define data classes
 class SerpQuery {
     query string
@@ -46,9 +39,15 @@ class FeedbackResponse {
     language string
 }
 
+class ProcessSerpResultOutput {
+    learnings Learning[]
+    followUpQuestions string[]
+    topUrls TopUrl[]? @optional
+}
+
 // Generate SERP queries
 function GenerateSerpQueries(query: string, numQueries: int, learnings: string[]) -> SerpQuery[] {
-    client MyClients
+    client DeepSeekClient // Default client
     prompt #"
         Generate {{ numQueries }} professional, rigorously crafted, and innovative search queries to explore the following research topic. Each query should be descriptive and of optimal length (approximately 8-12 words) and must be paired with a brief, actionable research goal that leverages modern analytical frameworks and adheres to industry best practices.
         
@@ -64,12 +63,8 @@ function GenerateSerpQueries(query: string, numQueries: int, learnings: string[]
 }
 
 // Process SERP results
-function ProcessSerpResult(query: string, searchResults: string, numLearnings: int, numFollowUpQuestions: int, includeTopUrls: bool) -> {
-    learnings: Learning[]
-    followUpQuestions: string[]
-    topUrls: TopUrl[]? @optional
-} {
-    client MyClients
+function ProcessSerpResult(query: string, searchResults: string, numLearnings: int, numFollowUpQuestions: int, includeTopUrls: bool) -> ProcessSerpResultOutput {
+    client DeepSeekClient // Default client
     prompt #"
         Conduct a rigorous and scholarly analysis of the following search results for "{{ query }}". Generate {{ numLearnings }} key insights, each with the title and URL of the source that supports it, and {{ numFollowUpQuestions }} thought-provoking follow-up questions that are deeply grounded in current research trends and critical evaluation.{{ if includeTopUrls }} Also, identify candidate top recommendations with clear, evidence-based justification.{{ endif }}
         
@@ -82,7 +77,7 @@ function ProcessSerpResult(query: string, searchResults: string, numLearnings: i
 
 // Generate executive summary
 function GenerateSummary(content: string) -> string {
-    client MyClients
+    client DeepSeekClient // Default client
     prompt #"
         Based on the following research learnings, generate an executive summary in bullet points. Each bullet point should be a concise statement.
         
@@ -95,7 +90,7 @@ function GenerateSummary(content: string) -> string {
 
 // Write final report
 function WriteFinalReport(prompt: string, executiveSummary: string, formattedLearnings: string) -> string {
-    client MyClients
+    client DeepSeekClient // Default client
     prompt #"
         Executive Summary:
         {{ executiveSummary }}
@@ -111,7 +106,7 @@ function WriteFinalReport(prompt: string, executiveSummary: string, formattedLea
 
 // Generate feedback questions
 function GenerateFeedback(query: string, numQuestions: int) -> FeedbackResponse {
-    client MyClients
+    client DeepSeekClient // Default client
     prompt #"
         Given the following query from the user, generate {{ numQuestions }} follow-up questions to clarify the research direction. Also, detect and return the language of the query.
         
