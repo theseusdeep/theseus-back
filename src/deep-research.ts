@@ -398,26 +398,20 @@ export async function writeFinalReport({
     const combinedLearnings = learnings.join('\n');
     const executiveSummary = await generateSummary(combinedLearnings, selectedModel);
 
-    // Instead of a simple list of citations, integrate them contextually as instruction for the model.
-    const contextualCitations = relevantUrls.length > 0 ? relevantUrls.join('\n') : '';
+    const citationsMarkdown = relevantUrls.length > 0
+      ? relevantUrls.map(url => `- [${url}](${url})`).join('\n')
+      : 'No se encontraron URLs relevantes.';
 
-    const promptText = `Genera un informe final de investigación que integre de forma contextual las citas y referencias relevantes en cada sección del informe. No presentes una lista genérica de todas las URLs, sino incorpora únicamente aquellas que sean útiles para respaldar y enriquecer el contenido, integrándolas en el cuerpo del texto de forma natural y explicativa.
-
-El informe debe estar estructurado en secciones claras (por ejemplo: Resumen Ejecutivo, Introducción, Metodología, Análisis, Conclusiones) y cada sección debe contextualizar las citas según corresponda.
-
-Executive Summary:
+    const promptText = `Executive Summary:
 ${executiveSummary}
 
-User Input:
-"${prompt}"
-
+User Input: "${prompt}"
 Research Learnings:
 ${learnings.join('\n')}
 
-URLs relevantes para evaluar su pertinencia (utiliza solo las que sean útiles en el contexto):
-${contextualCitations}
-`;
-
+## Citations:
+${citationsMarkdown}`;
+    
     const res = await generateObjectSanitized({
       model: selectedModel ? createModel(selectedModel) : deepSeekModel,
       system: reportPrompt(new Date().toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }), language || 'Spanish'),
@@ -432,10 +426,10 @@ ${contextualCitations}
     return safeResult.reportMarkdown.replace(/\\n/g, '\n');
   } catch (error) {
     logger.error('Error generating final report', { error });
-    const fallbackCitations = relevantUrls.length > 0
-      ? relevantUrls.join('\n')
+    const citationsMarkdown = relevantUrls.length > 0
+      ? relevantUrls.map(url => `- ${url}`).join('\n')
       : 'No se encontraron URLs relevantes.';
-    return `# Informe de Investigación\n\nEntrada del Usuario: ${prompt}\n\nAprendizajes Clave:\n${learnings.join('\n')}\n\nReferencias pertinentes:\n${fallbackCitations}`;
+    return `# Informe de Investigación\n\nEntrada del Usuario: ${prompt}\n\nAprendizajes Clave:\n${learnings.join('\n')}\n\n## Citas:\n${citationsMarkdown}`;
   }
 }
 
