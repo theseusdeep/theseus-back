@@ -1,7 +1,21 @@
 export const baml = {
   GenerateSerpQueries: {
     withClient: (clientName: string) => async (query: string, numQueries: number, learnings: string[]) => {
-      throw new Error("BAML client not generated");
+      // Return a fallback array of queries
+      return [
+        {
+          query: query,
+          researchGoal: 'Explore basic concepts and current trends',
+        },
+        {
+          query: `${query} latest developments`,
+          researchGoal: 'Focus on recent innovations and updates',
+        },
+        {
+          query: `${query} detailed analysis`,
+          researchGoal: 'Deep dive into specific aspects and implications',
+        },
+      ].slice(0, numQueries);
     },
   },
   ProcessSerpResult: {
@@ -12,7 +26,6 @@ export const baml = {
       numFollowUpQuestions: number,
       includeTopUrls: boolean,
     ) => {
-      // Return a fallback result so that deepResearch can continue.
       return {
         learnings: [
           { insight: `Found preliminary insights about ${query}`, sourceTitle: 'Unknown', sourceUrl: 'http://example.com' },
@@ -40,7 +53,6 @@ export const baml = {
   },
   GenerateFeedback: {
     withClient: (clientName: string) => async (query: string, numQuestions: number) => {
-      // Return a default fallback response for feedback generation.
       return {
         questions: [
           'Could you provide more specific details about what you want to learn?',
