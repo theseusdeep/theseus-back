@@ -398,10 +398,6 @@ export async function writeFinalReport({
     const combinedLearnings = learnings.join('\n');
     const executiveSummary = await generateSummary(combinedLearnings, selectedModel);
 
-    const citationsMarkdown = relevantUrls.length > 0
-      ? relevantUrls.map(url => `- [${url}](${url})`).join('\n')
-      : 'No se encontraron URLs relevantes.';
-
     const promptText = `Executive Summary:
 ${executiveSummary}
 
@@ -409,8 +405,11 @@ User Input: "${prompt}"
 Research Learnings:
 ${learnings.join('\n')}
 
-## Citations:
-${citationsMarkdown}`;
+Your task is to generate a detailed, comprehensive final report that integrates all the meaningful data retrieved during the research. Incorporate citations and quotes contextually within the report, ensuring that each claim or piece of data is accompanied by a relevant citation with a brief explanation of its source and its relevance. Do not simply list URLs at the end. Instead, embed the references naturally in the text. At the end of the report, include a "References" section that provides a contextual summary for each cited source.
+
+Provided Relevant URLs:
+${relevantUrls.join('\n')}
+`;
     
     const res = await generateObjectSanitized({
       model: selectedModel ? createModel(selectedModel) : deepSeekModel,
@@ -426,10 +425,7 @@ ${citationsMarkdown}`;
     return safeResult.reportMarkdown.replace(/\\n/g, '\n');
   } catch (error) {
     logger.error('Error generating final report', { error });
-    const citationsMarkdown = relevantUrls.length > 0
-      ? relevantUrls.map(url => `- ${url}`).join('\n')
-      : 'No se encontraron URLs relevantes.';
-    return `# Informe de Investigación\n\nEntrada del Usuario: ${prompt}\n\nAprendizajes Clave:\n${learnings.join('\n')}\n\n## Citas:\n${citationsMarkdown}`;
+    return `# Informe de Investigación\n\nEntrada del Usuario: ${prompt}\n\nAprendizajes Clave:\n${learnings.join('\n')}\n\n## References:\n${relevantUrls.join('\n')}`;
   }
 }
 
