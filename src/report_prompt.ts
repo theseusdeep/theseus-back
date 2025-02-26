@@ -24,7 +24,8 @@ Structure the report into the following sections:
 7. **Conclusion**: A concise summary of the research outcomes and final reflections.
 8. **References**: A list of all sources cited in the report, with their titles and URLs.
 
-Return only a valid JSON object in the following format:
+IMPORTANT: Return only a raw, valid JSON object with no additional text, explanation, markdown formatting, HTML tags, or code block markers. The JSON object must follow exactly the format below:
+
 {"reportMarkdown": "Your complete Markdown formatted report here with \\n for new lines."};
 `;
 };
