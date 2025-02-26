@@ -1,8 +1,4 @@
-import { generateObject } from 'ai';
-import { z } from 'zod';
-import { createModel, deepSeekModel } from './ai/providers';
-import { feedbackPrompt } from './feedback_prompt';
-import { generateObjectSanitized } from './deep-research';
+import { b } from 'baml_client'; // Import BAML client
 import { logger } from './api/utils/logger';
 
 interface FeedbackResponse {
@@ -30,32 +26,9 @@ export async function generateFeedback({
 
   try {
     logger.info('generateFeedback called', { query, numQuestions, selectedModel });
-    let userFeedback;
-    try {
-      userFeedback = await generateObjectSanitized({
-        model: selectedModel ? createModel(selectedModel) : deepSeekModel,
-        system: feedbackPrompt(),
-        prompt: `Given the following query from the user, generate ${numQuestions} follow-up questions to clarify the research direction. Also, detect and return the language of the query. Format your response as a JSON object with two keys: "questions" (an array of questions) and "language" (a string representing the detected language).
-
-Query: "${query}"
-
-Example response format:
-{"questions": ["What specific aspects of this topic interest you most?", "Are you looking for current developments or historical context?", "What is your intended use case for this information?"], "language": "English"}`,
-        schema: z.object({
-          questions: z.array(z.string()).min(1).max(numQuestions).describe('Follow up questions to clarify the research direction'),
-          language: z.string().describe('Detected language of the user query'),
-        }),
-        maxTokens: 8192,
-        temperature: 0.7,
-      });
-    } catch (innerError) {
-      logger.error('Error in generateObjectSanitized in generateFeedback', { innerError });
-      return fallback;
-    }
-
-    const typedFeedback = userFeedback.object as FeedbackResponse;
-    logger.info('Feedback generated', { questions: typedFeedback.questions, language: typedFeedback.language });
-    return { questions: typedFeedback.questions.slice(0, numQuestions), language: typedFeedback.language };
+    const feedback = await b.GenerateFeedback({ query, numQuestions });
+    logger.info('Feedback generated', { questions: feedback.questions, language: feedback.language });
+    return { questions: feedback.questions.slice(0, numQuestions), language: feedback.language };
   } catch (error) {
     logger.error('Error generating feedback', { error });
     return fallback;
