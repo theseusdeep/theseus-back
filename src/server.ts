@@ -351,15 +351,23 @@ app.get(
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const sanitizedTitle = reportTitle.replace(/[^a-zA-Z0-9]/g, '-').substring(0, 30);
+
+      // Set headers for PDF download
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="${sanitizedTitle}-${timestamp}.pdf"`);
-      res.send(pdfBuffer);
+      res.setHeader('Content-Length', pdfBuffer.length.toString());
+
+      // Write binary data directly
+      res.status(200);
+      res.write(pdfBuffer);
+      res.end();
+
       logger.info('PDF generated successfully', { researchId });
     } catch (error) {
       logger.error('Error generating PDF', { error, researchId });
-      return res.status(500).json({ 
-        error: 'Failed to generate PDF', 
-        details: error instanceof Error ? error.message : 'Unknown error' 
+      return res.status(500).json({
+        error: 'Failed to generate PDF',
+        details: error instanceof Error ? error.message : 'Unknown error',
       });
     }
   }),
