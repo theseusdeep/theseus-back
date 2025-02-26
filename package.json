@@ -4,7 +4,8 @@
   "main": "src/server.ts",
   "scripts": {
     "format": "prettier --write \"src/**/*.{ts,tsx}\"",
-    "dev": "tsx src/server.ts"
+    "dev": "tsx src/server.ts",
+    "baml:generate": "baml generate"
   },
   "dependencies": {
     "express": "^4.21.2",
@@ -36,7 +37,8 @@
     "@types/lodash-es": "^4.17.12",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
-    "prettier": "^3.4.2"
+    "prettier": "^3.4.2",
+    "@boundaryml/baml-cli": "^0.36.0"
   },
   "engines": {
     "node": "22.x"
