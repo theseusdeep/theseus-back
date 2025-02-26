@@ -52,7 +52,7 @@ function GenerateSerpQueries(query: string, numQueries: int, learnings: string[]
         Generate {{ numQueries }} professional, rigorously crafted, and innovative search queries to explore the following research topic. Each query should be descriptive and of optimal length (approximately 8-12 words) and must be paired with a brief, actionable research goal that leverages modern analytical frameworks and adheres to industry best practices.
         
         Topic: "{{ query }}"
-        {{ if learnings | length > 0 }}
+        {% if learnings | length > 0 %}
         Previous insights:
         {{ learnings | join('\n') }}
         {{ endif }}
@@ -66,7 +66,7 @@ function GenerateSerpQueries(query: string, numQueries: int, learnings: string[]
 function ProcessSerpResult(query: string, searchResults: string, numLearnings: int, numFollowUpQuestions: int, includeTopUrls: bool) -> ProcessSerpResultOutput {
     client DeepSeekClient // Default client
     prompt #"
-        Conduct a rigorous and scholarly analysis of the following search results for "{{ query }}". Generate {{ numLearnings }} key insights, each with the title and URL of the source that supports it, and {{ numFollowUpQuestions }} thought-provoking follow-up questions that are deeply grounded in current research trends and critical evaluation.{{ if includeTopUrls }} Also, identify candidate top recommendations with clear, evidence-based justification.{{ endif }}
+        Conduct a rigorous and scholarly analysis of the following search results for "{{ query }}". Generate {{ numLearnings }} key insights, each with the title and URL of the source that supports it, and {{ numFollowUpQuestions }} thought-provoking follow-up questions that are deeply grounded in current research trends and critical evaluation.{% if includeTopUrls %} Also, identify candidate top recommendations with clear, evidence-based justification.{% endif %}
         
         Search Results:
         {{ searchResults }}
