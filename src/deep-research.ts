@@ -408,41 +408,18 @@ User Input: "${prompt}"
 Research Learnings with Sources:
 ${formattedLearnings}`;
 
-    const maxAttempts = 3;
-    let attempt = 0;
-    let finalReport = '';
-    while (attempt < maxAttempts) {
-      try {
-        const res = await generateObjectSanitized({
-          model: selectedModel ? createModel(selectedModel) : deepSeekModel,
-          system: reportPrompt(new Date().toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }), language || 'Spanish'),
-          prompt: promptText,
-          schema: z.object({
-            reportMarkdown: z.string().describe('Informe final sobre el tema en formato Markdown con saltos de línea explícitos'),
-          }),
-          temperature: 0.6,
-          maxTokens: 8192,
-        });
-        const safeResult = res.object as { reportMarkdown: string };
-        finalReport = safeResult.reportMarkdown.replace(/\\n/g, '\n');
-        if (!finalReport.trim().startsWith('<!DOCTYPE')) {
-          break;
-        } else {
-          throw new Error('LLM returned HTML instead of JSON');
-        }
-      } catch (err) {
-        logger.error(`Error generating final report on attempt ${attempt + 1}`, { error: err });
-        attempt++;
-        if (attempt < maxAttempts) {
-          await new Promise(resolve => setTimeout(resolve, 3000));
-        }
-      }
-    }
-    if (!finalReport) {
-      const formattedLearningsFallback = learnings.map(l => `- ${l.insight} ([${l.sourceTitle}](${l.sourceUrl}))`).join('\n');
-      finalReport = `# Informe de Investigación\n\nEntrada del Usuario: ${prompt}\n\nAprendizajes Clave:\n${formattedLearningsFallback}`;
-    }
-    return finalReport;
+    const res = await generateObjectSanitized({
+      model: selectedModel ? createModel(selectedModel) : deepSeekModel,
+      system: reportPrompt(new Date().toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }), language || 'Spanish'),
+      prompt: promptText,
+      schema: z.object({
+        reportMarkdown: z.string().describe('Informe final sobre el tema en formato Markdown con saltos de línea explícitos'),
+      }),
+      temperature: 0.6,
+      maxTokens: 8192,
+    });
+    const safeResult = res.object as { reportMarkdown: string };
+    return safeResult.reportMarkdown.replace(/\\n/g, '\n');
   } catch (error) {
     logger.error('Error generating final report', { error });
     const formattedLearnings = learnings.map(l => `- ${l.insight} ([${l.sourceTitle}](${l.sourceUrl}))`).join('\n');
