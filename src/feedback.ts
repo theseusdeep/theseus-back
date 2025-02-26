@@ -6,6 +6,15 @@ interface FeedbackResponse {
   language: string;
 }
 
+const modelToClientMap: Record<string, string> = {
+  'deepseek-r1-671b': 'DeepSeekClient',
+  'gpt-4o': 'GPT4Client',
+};
+
+function getClientName(selectedModel?: string): string {
+  return selectedModel ? (modelToClientMap[selectedModel] || 'DeepSeekClient') : 'DeepSeekClient';
+}
+
 export async function generateFeedback({
   query,
   numQuestions = 3,
@@ -26,14 +35,6 @@ export async function generateFeedback({
 
   try {
     logger.info('generateFeedback called', { query, numQuestions, selectedModel });
-    // Determine the client name based on the selected model
-    function getClientName(selectedModel?: string): string {
-      const modelToClientMap: Record<string, string> = {
-        'deepseek-r1-671b': 'DeepSeekClient',
-        'gpt-4o': 'GPT4Client',
-      };
-      return selectedModel ? modelToClientMap[selectedModel] || 'DeepSeekClient' : 'DeepSeekClient';
-    }
     const clientName = getClientName(selectedModel);
     const feedback = await b.GenerateFeedback.withClient(clientName)(query, numQuestions);
     logger.info('Feedback generated', { questions: feedback.questions, language: feedback.language });
