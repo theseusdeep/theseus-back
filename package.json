@@ -3,13 +3,10 @@
   "version": "0.0.1",
   "main": "src/server.ts",
   "scripts": {
-    "start": "npm run dev",
     "format": "prettier --write \"src/**/*.{ts,tsx}\"",
-    "dev": "tsx src/server.ts",
-    "baml:generate": "baml-cli generate"
+    "dev": "tsx src/server.ts"
   },
   "dependencies": {
-    "@boundaryml/baml": "^0.77.0",
     "express": "^4.21.2",
     "cookie-parser": "^1.4.6",
     "dotenv": "^16.0.3",
