@@ -30,7 +30,7 @@ function getMaxConcurrency(modelId: string): number {
 }
 
 export interface ResearchResult {
-  learnings: string[];
+  learnings: Array<{ insight: string; sourceTitle: string; sourceUrl: string }>;
   visitedUrls: string[];
   topUrls: Array<{ url: string; description: string }>;
   relevantUrls: string[];
@@ -141,14 +141,15 @@ async function generateSerpQueries({
 }: {
   query: string;
   numQueries?: number;
-  learnings?: string[];
+  learnings?: Array<{ insight: string; sourceTitle: string; sourceUrl: string }>;
   selectedModel?: string;
 }) {
   try {
+    const learningsText = learnings ? learnings.map(l => l.insight).join('\n') : '';
     const promptText = `Generate ${numQueries} professional, rigorously crafted, and innovative search queries to explore the following research topic. Each query should be descriptive and of optimal length (approximately 8-12 words) and must be paired with a brief, actionable research goal that leverages modern analytical frameworks and adheres to industry best practices.
     
 Topic: "${query}"
-${learnings ? `Previous insights:\n${learnings.join('\n')}` : ''}
+${learningsText ? `Previous insights:\n${learningsText}` : ''}
 Ensure that the queries are directly aligned with the user's original intent and any provided feedback.
 
 Required JSON format:
@@ -253,7 +254,7 @@ async function processSerpResult({
 
   try {
     let trimmedContents = validContents.join('\n\n');
-    let promptText = `Conduct a rigorous and scholarly analysis of the following search results for "${query}". Generate ${numLearnings} key insights and ${numFollowUpQuestions} thought‑provoking follow‑up questions that are deeply grounded in current research trends and critical evaluation.${includeTopUrls ? ' Also, identify candidate top recommendations with clear, evidence‑based justification.' : ''}
+    let promptText = `Conduct a rigorous and scholarly analysis of the following search results for "${query}". Generate ${numLearnings} key insights, each with the title and URL of the source that supports it, and ${numFollowUpQuestions} thought-provoking follow-up questions that are deeply grounded in current research trends and critical evaluation.${includeTopUrls ? ' Also, identify candidate top recommendations with clear, evidence-based justification.' : ''}
 
 Search Results:
 ${trimmedContents}
@@ -261,17 +262,15 @@ ${trimmedContents}
 Required JSON format:
 {
   "learnings": [
-    "First key insight derived from the analysis",
-    "Second key insight derived from the analysis",
-    "Third key insight derived from the analysis"
+    { "insight": "First key insight", "sourceTitle": "Title of the source", "sourceUrl": "http://example.com" },
+    { "insight": "Second key insight", "sourceTitle": "Title of another source", "sourceUrl": "http://example2.com" }
   ],
   "followUpQuestions": [
-    "First probing follow‑up question",
-    "Second probing follow‑up question",
-    "Third probing follow‑up question"
+    "First probing follow-up question",
+    "Second probing follow-up question"
   ]${includeTopUrls ? `,
   "topUrls": [
-    { "url": "http://example.com", "description": "Evidence‑based justification for this recommendation" }
+    { "url": "http://example.com", "description": "Evidence-based justification" }
   ]` : ''}
 };`;
     let tokenCount = encoder.encode(promptText).length;
@@ -281,7 +280,7 @@ Required JSON format:
       if (tokenCount <= getMaxContextTokens(selectedModel)) break;
       logger.warn(`Prompt too long (${tokenCount} tokens), trimming to ${trimSize} per content...`);
       const reTrimmed = validContents.map((content) => trimPrompt(content ?? '', trimSize)).join('\n\n');
-      promptText = `Conduct a rigorous and scholarly analysis of the following search results for "${query}". Generate ${numLearnings} key insights and ${numFollowUpQuestions} thought‑provoking follow‑up questions that are deeply grounded in current research trends and critical evaluation.${includeTopUrls ? ' Also, identify candidate top recommendations with clear, evidence‑based justification.' : ''}
+      promptText = `Conduct a rigorous and scholarly analysis of the following search results for "${query}". Generate ${numLearnings} key insights, each with the title and URL of the source that supports it, and ${numFollowUpQuestions} thought-provoking follow-up questions that are deeply grounded in current research trends and critical evaluation.${includeTopUrls ? ' Also, identify candidate top recommendations with clear, evidence-based justification.' : ''}
 
 Search Results:
 ${reTrimmed}
@@ -289,17 +288,15 @@ ${reTrimmed}
 Required JSON format:
 {
   "learnings": [
-    "First key insight derived from the analysis",
-    "Second key insight derived from the analysis",
-    "Third key insight derived from the analysis"
+    { "insight": "First key insight", "sourceTitle": "Title of the source", "sourceUrl": "http://example.com" },
+    { "insight": "Second key insight", "sourceTitle": "Title of another source", "sourceUrl": "http://example2.com" }
   ],
   "followUpQuestions": [
-    "First probing follow‑up question",
-    "Second probing follow‑up question",
-    "Third probing follow‑up question"
+    "First probing follow-up question",
+    "Second probing follow-up question"
   ]${includeTopUrls ? `,
   "topUrls": [
-    { "url": "http://example.com", "description": "Evidence‑based justification for this recommendation" }
+    { "url": "http://example.com", "description": "Evidence-based justification" }
   ]` : ''}
 };`;
       tokenCount = encoder.encode(promptText).length;
@@ -313,13 +310,17 @@ Required JSON format:
       system: systemPrompt(),
       prompt: promptText,
       schema: z.object({
-        learnings: z.array(z.string()).describe('Key insights from the search results'),
-        followUpQuestions: z.array(z.string()).describe('Follow‑up questions to explore the topic further'),
+        learnings: z.array(z.object({
+          insight: z.string().describe('Key insight derived from the analysis'),
+          sourceTitle: z.string().describe('Title of the source that supports this insight'),
+          sourceUrl: z.string().describe('URL of the source that supports this insight'),
+        })),
+        followUpQuestions: z.array(z.string()).describe('Follow-up questions to explore the topic further'),
         topUrls: z.array(z.object({ url: z.string(), description: z.string() })).optional(),
       }),
     });
     const safeResult = res.object as {
-      learnings: string[];
+      learnings: Array<{ insight: string; sourceTitle: string; sourceUrl: string }>;
       followUpQuestions: string[];
       topUrls?: Array<{ url: string; description: string }>;
     };
@@ -334,9 +335,9 @@ Required JSON format:
     logger.error('Error processing SERP result', { error });
     return {
       learnings: [
-        `Found preliminary insights about ${query}`,
-        'Additional research may be needed for deeper analysis',
-        'Consider exploring related areas for further information',
+        { insight: `Found preliminary insights about ${query}`, sourceTitle: 'Unknown', sourceUrl: 'http://example.com' },
+        { insight: 'Additional research may be needed for deeper analysis', sourceTitle: 'Unknown', sourceUrl: 'http://example.com' },
+        { insight: 'Consider exploring related areas for further information', sourceTitle: 'Unknown', sourceUrl: 'http://example.com' },
       ].slice(0, numLearnings),
       followUpQuestions: [
         `What are the most critical aspects of ${query}?`,
@@ -387,7 +388,7 @@ export async function writeFinalReport({
   relevantUrls = [],
 }: {
   prompt: string;
-  learnings: string[];
+  learnings: Array<{ insight: string; sourceTitle: string; sourceUrl: string }>;
   visitedUrls: string[];
   selectedModel?: string;
   language?: string;
@@ -395,22 +396,18 @@ export async function writeFinalReport({
   relevantUrls?: string[];
 }) {
   try {
-    const combinedLearnings = learnings.join('\n');
-    const executiveSummary = await generateSummary(combinedLearnings, selectedModel);
+    const formattedLearnings = learnings.map(l => `- ${l.insight} ([${l.sourceTitle}](${l.sourceUrl}))`).join('\n');
+    const insightsText = learnings.map(l => l.insight).join('\n');
+    const executiveSummary = await generateSummary(insightsText, selectedModel);
 
     const promptText = `Executive Summary:
 ${executiveSummary}
 
 User Input: "${prompt}"
-Research Learnings:
-${learnings.join('\n')}
 
-Your task is to generate a detailed, comprehensive final report that integrates all the meaningful data retrieved during the research. Incorporate citations and quotes contextually within the report, ensuring that each claim or piece of data is accompanied by a relevant citation with a brief explanation of its source and its relevance. Do not simply list URLs at the end. Instead, embed the references naturally in the text. At the end of the report, include a "References" section that provides a contextual summary for each cited source.
+Research Learnings with Sources:
+${formattedLearnings}`;
 
-Provided Relevant URLs:
-${relevantUrls.join('\n')}
-`;
-    
     const res = await generateObjectSanitized({
       model: selectedModel ? createModel(selectedModel) : deepSeekModel,
       system: reportPrompt(new Date().toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }), language || 'Spanish'),
@@ -425,7 +422,8 @@ ${relevantUrls.join('\n')}
     return safeResult.reportMarkdown.replace(/\\n/g, '\n');
   } catch (error) {
     logger.error('Error generating final report', { error });
-    return `# Informe de Investigación\n\nEntrada del Usuario: ${prompt}\n\nAprendizajes Clave:\n${learnings.join('\n')}\n\n## References:\n${relevantUrls.join('\n')}`;
+    const formattedLearnings = learnings.map(l => `- ${l.insight} ([${l.sourceTitle}](${l.sourceUrl}))`).join('\n');
+    return `# Informe de Investigación\n\nEntrada del Usuario: ${prompt}\n\nAprendizajes Clave:\n${formattedLearnings}`;
   }
 }
 
@@ -472,7 +470,7 @@ export async function deepResearch({
   query: string;
   breadth: number;
   depth: number;
-  learnings?: string[];
+  learnings?: Array<{ insight: string; sourceTitle: string; sourceUrl: string }>;
   visitedUrls?: string[];
   selectedModel?: string;
   concurrency?: number;
@@ -574,7 +572,7 @@ export async function deepResearch({
     )
   );
 
-  const allLearnings = [...new Set(results.flatMap((r) => r.learnings))];
+  const allLearnings = results.flatMap((r) => r.learnings);
   const allVisitedUrls = [
     ...new Set(results.flatMap((r) => r.visitedUrls.filter((u): u is string => u !== undefined))),
   ];
@@ -635,12 +633,12 @@ export async function generateFeedback({
     const userFeedback = await generateObjectSanitized({
       model: selectedModel ? createModel(selectedModel) : deepSeekModel,
       system: feedbackPrompt(),
-      prompt: `Dada la siguiente consulta del usuario, genera ${numQuestions} preguntas de seguimiento para aclarar la dirección de la investigación. También detecta y devuelve el idioma de la consulta. Formatea tu respuesta como un objeto JSON con dos claves: "questions" (un arreglo de preguntas) y "language" (una cadena que representa el idioma detectado).
+      prompt: `Given the following query from the user, generate ${numQuestions} follow-up questions to clarify the research direction. Also, detect and return the language of the query. Format your response as a JSON object with two keys: "questions" (an array of questions) and "language" (a string representing the detected language).
 
-Consulta: "${query}"
+Query: "${query}"
 
-Formato de respuesta de ejemplo:
-{"questions": ["¿Qué aspectos específicos de este tema te interesan más?", "¿Buscas desarrollos actuales o contexto histórico?", "¿Cuál es tu caso de uso previsto para esta información?"], "language": "Spanish"}`,
+Example response format:
+{"questions": ["What specific aspects of this topic interest you most?", "Are you looking for current developments or historical context?", "What is your intended use case for this information?"], "language": "English"}`,
       schema: z.object({
         questions: z.array(z.string()).min(1).max(numQuestions).describe('Preguntas de seguimiento para aclarar la dirección de la investigación'),
         language: z.string().describe('Idioma detectado de la consulta del usuario'),
