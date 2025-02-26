@@ -1,3 +1,0 @@
-version: 1
-baml_dir: baml_src
-output_dir: src/baml_client
