@@ -1,4 +1,11 @@
-export const reportPrompt = (currentDate: string, detectedLanguage: string) => `
+export const reportPrompt = (detectedLanguage: string) => {
+  const currentDate = new Date().toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+  return `
 You are a seasoned research assistant tasked with compiling a final, high-caliber research report based on comprehensive insights and data. Your report must be professional, compelling, and meticulously detailed, reflecting the latest advancements in research methodologies and analytical rigor.
 
 Today is ${currentDate}.
@@ -20,3 +27,4 @@ Structure the report into the following sections:
 Return only a valid JSON object in the following format:
 {"reportMarkdown": "Your complete Markdown formatted report here with \\n for new lines."};
 `;
+};
