@@ -48,7 +48,8 @@ export const baml = {
   },
   WriteFinalReport: {
     withClient: (clientName: string) => async (prompt: string, executiveSummary: string, formattedLearnings: string) => {
-      throw new Error("BAML client not generated");
+      // Return a fallback JSON string so that finalizeTopRecommendations falls back to its own logic.
+      return JSON.stringify({ finalTopUrls: null });
     },
   },
   GenerateFeedback: {
