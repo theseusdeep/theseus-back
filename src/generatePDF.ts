@@ -265,7 +265,7 @@ export const generatePDF = async (reportTitle: string, reportMarkdown: string, r
 
   // Wait for TOC generation, with a fallback
   try {
-    await page.waitForFunction('window.tocGenerated === true', { timeout: 10000 });
+    await page.waitForFunction('window.tocGenerated === true', { timeout: 15000 });
   } catch (error) {
     console.warn('TOC generation timed out, proceeding without TOC.');
   }
