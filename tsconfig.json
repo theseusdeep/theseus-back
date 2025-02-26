@@ -17,6 +17,10 @@
     "target": "ES2022",
     "jsx": "react-jsx",
     "types": ["node"],
-    "typeRoots": ["./node_modules/@types"]
+    "typeRoots": ["./node_modules/@types"],
+    "baseUrl": ".",
+    "paths": {
+      "baml_client": ["src/baml_client"]
+    }
   }
 }
