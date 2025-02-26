@@ -31,3 +31,5 @@ export const baml = {
     },
   },
 };
+
+export const b = baml;
