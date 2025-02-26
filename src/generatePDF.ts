@@ -1,5 +1,6 @@
 import puppeteer from 'puppeteer';
 import showdown from 'showdown';
+import chromium from 'chromium';
 
 const enhancedCSS = `<style>
   /* Removed "@page { size: A4; }" to avoid conflict with Puppeteer PDF settings */
@@ -246,7 +247,9 @@ export const generatePDF = async (reportTitle: string, reportMarkdown: string, r
     </html>
   `;
 
+  // Use node-chromium for the executable path
   const browser = await puppeteer.launch({
+    executablePath: chromium.path,
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
   });
