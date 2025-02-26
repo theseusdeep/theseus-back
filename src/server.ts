@@ -179,6 +179,10 @@ app.post(
     (async () => {
       let currentLearnings: string[] = previousContext ? (Array.isArray(previousContext) ? previousContext : [previousContext]) : [];
       let iteration = 1;
+      let retryCount = 0;
+      const maxRetryAttempts = 3;
+      let noProgressCount = 0;
+      let lastLearningsCount = currentLearnings.length;
 
       while (true) {
         if (abortController.signal.aborted) {
@@ -213,13 +217,23 @@ app.post(
             learnings: ['Fallback: Research timed out. Partial results may be incomplete.'],
             visitedUrls: [],
             topUrls: [],
+            relevantUrls: [],
           };
-          const { learnings, visitedUrls, topUrls } = await withTimeout(
+          const { learnings, visitedUrls, topUrls, relevantUrls } = await withTimeout(
             researchPromise,
             researchTimeoutMs,
             fallbackResult,
           );
 
+          // Check progress: if no new learnings, increment noProgressCount
+          if (learnings.length <= lastLearningsCount) {
+            noProgressCount++;
+            logger.warn('No new progress detected in this iteration.', { researchId, noProgressCount });
+            updateResearchProgress(researchId, `No new progress detected. Retry attempt ${noProgressCount}...`);
+          } else {
+            noProgressCount = 0; // reset if progress is made
+          }
+          lastLearningsCount = learnings.length;
           currentLearnings = learnings;
 
           const reportPromise = writeFinalReport({
@@ -240,6 +254,7 @@ app.post(
             await sendEmail(email, subject, report);
             updateResearchProgress(researchId, `Iteration ${iteration} completed and emailed.`);
             iteration++;
+            retryCount = 0; // reset retry counter on success
           } else {
             updateResearchProgress(researchId, `REPORT:${report}`);
             setResearchFinalReport(researchId, report);
@@ -253,13 +268,32 @@ app.post(
             ongoingResearch.delete(researchId);
             break;
           }
+
+          // If no progress for several iterations, consider finalizing
+          if (noProgressCount >= 3) {
+            const finalReport = `# Research Report\n\nNo further progress could be made after multiple attempts. Current learnings: ${currentLearnings.join(', ')}`;
+            updateResearchProgress(researchId, `Finalizing research due to lack of progress.`);
+            setResearchFinalReport(researchId, finalReport);
+            logger.info('Research finalized due to lack of progress', { researchId });
+            ongoingResearch.delete(researchId);
+            break;
+          }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-          updateResearchProgress(researchId, `ERROR:Research failed - ${errorMessage}`);
-          setResearchFinalReport(researchId, `ERROR:Research failed - ${errorMessage}`);
-          logger.error('Research failed', { researchId, error });
-          ongoingResearch.delete(researchId);
-          break;
+          logger.error('Error during research iteration', { researchId, error: errorMessage });
+          if (retryCount < maxRetryAttempts) {
+            retryCount++;
+            updateResearchProgress(researchId, `Encountered error: ${errorMessage}. Retrying from last valid step (Attempt ${retryCount} of ${maxRetryAttempts})...`);
+            // Wait for a short delay before retrying
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            continue; // retry the iteration
+          } else {
+            updateResearchProgress(researchId, `ERROR: Research failed after ${maxRetryAttempts} retries - ${errorMessage}`);
+            setResearchFinalReport(researchId, `ERROR: Research failed after ${maxRetryAttempts} retries - ${errorMessage}`);
+            logger.error('Research failed after maximum retry attempts', { researchId, error: errorMessage });
+            ongoingResearch.delete(researchId);
+            break;
+          }
         }
       }
     })();
