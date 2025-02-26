@@ -43,7 +43,8 @@ export const baml = {
   },
   GenerateSummary: {
     withClient: (clientName: string) => async (content: string) => {
-      throw new Error("BAML client not generated");
+      // Return a fallback executive summary string instead of throwing an error.
+      return "No se pudo generar el resumen ejecutivo debido a un error.";
     },
   },
   WriteFinalReport: {
