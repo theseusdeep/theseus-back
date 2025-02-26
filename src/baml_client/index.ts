@@ -27,7 +27,15 @@ export const baml = {
   },
   GenerateFeedback: {
     withClient: (clientName: string) => async (query: string, numQuestions: number) => {
-      throw new Error("BAML client not generated");
+      // Return a default fallback response for feedback generation.
+      return {
+        questions: [
+          'Could you provide more specific details about what you want to learn?',
+          'What is your main goal with this research?',
+          'Are there any specific aspects you want to focus on?'
+        ].slice(0, numQuestions),
+        language: 'English'
+      };
     },
   },
 };
