@@ -42,7 +42,7 @@ class FeedbackResponse {
 class ProcessSerpResultOutput {
     learnings Learning[]
     followUpQuestions string[]
-    topUrls TopUrl[]? @optional
+    topUrls TopUrl[]?
 }
 
 // Generate SERP queries
