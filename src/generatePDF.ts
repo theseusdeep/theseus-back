@@ -2,14 +2,9 @@ import puppeteer from 'puppeteer';
 import showdown from 'showdown';
 
 const enhancedCSS = `<style>
+  /* Removed "@page { size: A4; }" to avoid conflict with Puppeteer PDF settings */
   @page {
     margin: 25mm 20mm;
-    size: A4;
-  }
-  html, body {
-    width: 100%;
-    height: auto;
-    overflow: visible !important;
   }
   body {
     font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
@@ -24,7 +19,6 @@ const enhancedCSS = `<style>
     margin-top: 0;
     line-height: 1.2;
     color: #2C3E50;
-    page-break-inside: avoid;
   }
   h1 {
     font-size: 28pt;
@@ -46,11 +40,9 @@ const enhancedCSS = `<style>
   p {
     text-align: justify;
     margin-bottom: 16px;
-    page-break-inside: avoid;
   }
   ul, ol {
     margin: 0 0 16px 30px;
-    page-break-inside: avoid;
   }
   li {
     margin-bottom: 8px;
@@ -59,7 +51,6 @@ const enhancedCSS = `<style>
     width: 100%;
     border-collapse: collapse;
     margin: 20px 0;
-    page-break-inside: auto;
   }
   th, td {
     border: 1px solid #bdc3c7;
@@ -80,7 +71,6 @@ const enhancedCSS = `<style>
     margin: 20px 0;
     font-style: italic;
     color: #555;
-    page-break-inside: avoid;
   }
   code {
     font-family: "Courier New", Courier, monospace;
@@ -88,7 +78,6 @@ const enhancedCSS = `<style>
     padding: 4px;
     border-radius: 4px;
     font-size: 10pt;
-    page-break-inside: avoid;
   }
   pre {
     background-color: #f4f4f4;
@@ -99,7 +88,6 @@ const enhancedCSS = `<style>
     font-size: 10pt;
     margin: 20px 0;
     border: 1px solid #e0e0e0;
-    page-break-inside: avoid;
   }
   a {
     color: #2980b9;
@@ -114,7 +102,6 @@ const enhancedCSS = `<style>
     margin: 20px auto;
     display: block;
     box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-    page-break-inside: avoid;
   }
   hr {
     border: none;
@@ -265,10 +252,10 @@ export const generatePDF = async (reportTitle: string, reportMarkdown: string, r
   });
   const page = await browser.newPage();
 
-  // Make sure to emulate screen media so we get our full CSS
+  // Use screen media so we can apply all the CSS rules above
   await page.emulateMediaType('screen');
 
-  // Log console messages for debugging
+  // Log console messages for debugging (optional)
   page.on('console', msg => console.log('PAGE LOG:', msg.text()));
 
   await page.setContent(finalHtml, { waitUntil: 'networkidle0' });
@@ -281,6 +268,7 @@ export const generatePDF = async (reportTitle: string, reportMarkdown: string, r
   }
 
   const pdfBuffer = await page.pdf({
+    format: 'A4',
     printBackground: true,
     margin: {
       top: '25mm',
