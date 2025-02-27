@@ -369,7 +369,7 @@ ${content}`;
         summary: z.string().describe('Executive summary in bullet points'),
       }),
       temperature: 0.5,
-      maxTokens: 8192,
+      maxTokens: 1000,
     });
     return res.object.summary;
   } catch (error) {
@@ -394,7 +394,7 @@ export async function writeFinalReport({
   language?: string;
   topUrls?: Array<{ url: string; description: string }>;
   relevantUrls?: string[];
-}): Promise<string> {
+}) {
   try {
     // Format each learning so that if sourceUrl is missing or "undefined", use the first visited URL as fallback (if available)
     const formattedLearnings = learnings.map(l => {
@@ -403,10 +403,9 @@ export async function writeFinalReport({
       return `- ${l.insight} ([${title}](${url}))`;
     }).join('\n');
     const insightsText = learnings.map(l => l.insight).join('\n');
-    // Generate a detailed executive summary using increased maxTokens
     const executiveSummary = await generateSummary(insightsText, selectedModel);
 
-    const basePromptText = `Executive Summary:
+    const promptText = `Executive Summary:
 ${executiveSummary}
 
 User Input: "${prompt}"
@@ -414,46 +413,6 @@ User Input: "${prompt}"
 Research Learnings with Sources:
 ${formattedLearnings}`;
 
-    // First API call: Generate a detailed report outline
-    const outlinePrompt = `Based on the following information, generate a detailed report outline that includes sections for Executive Summary, User Intent and Inputs, Introduction, Methodology, Key Insights, Detailed Analysis (including comparative tables and in-depth discussion), Recommendations, Conclusion, and References. Include placeholder citations in the format [Source Title](URL). Provide the output as a JSON object with a key "outline" whose value is the report outline in Markdown format.
-
-Information:
-${basePromptText}
-
-Use all available context and provide a detailed, structured outline.`;
-    const outlineResponse = await generateObjectSanitized({
-      model: selectedModel ? createModel(selectedModel) : deepSeekModel,
-      system: reportPrompt(new Date().toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }), language || 'Spanish'),
-      prompt: outlinePrompt,
-      schema: z.object({
-        outline: z.string().describe('Detailed report outline in Markdown'),
-      }),
-      temperature: 0.6,
-      maxTokens: 8192,
-    });
-    const reportOutline = outlineResponse.object.outline;
-
-    // Second API call: Generate the final comprehensive report using the outline and all research information
-    const finalReportPrompt = `Using the following detailed report outline and the research information, generate a complete and comprehensive final research report. The report should be structured, professional, and include inline citations in the format [Source Title](URL) for each piece of evidence. It must incorporate all research findings and present a thorough discussion.
-
-Report Outline:
-${reportOutline}
-
-Research Information:
-${basePromptText}
-
-Structure the report into the following sections:
-1. Executive Summary
-2. User Intent and Inputs
-3. Introduction
-4. Methodology
-5. Key Insights
-6. Detailed Analysis
-7. Recommendations
-8. Conclusion
-9. References
-
-Return the final report as a valid JSON object with a key "reportMarkdown" whose value is the complete Markdown formatted report with \\n for new lines. Do not include any extra text.`;
     const maxAttempts = 3;
     let attempt = 0;
     let finalReport = '';
@@ -462,14 +421,15 @@ Return the final report as a valid JSON object with a key "reportMarkdown" whose
         const res = await generateObjectSanitized({
           model: selectedModel ? createModel(selectedModel) : deepSeekModel,
           system: reportPrompt(new Date().toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }), language || 'Spanish'),
-          prompt: finalReportPrompt,
+          prompt: promptText,
           schema: z.object({
-            reportMarkdown: z.string().describe('Final comprehensive report in Markdown format'),
+            reportMarkdown: z.string().describe('Informe final sobre el tema en formato Markdown con saltos de línea explícitos'),
           }),
           temperature: 0.6,
           maxTokens: 8192,
         });
-        finalReport = res.object.reportMarkdown.replace(/\\n/g, '\n');
+        const safeResult = res.object as { reportMarkdown: string };
+        finalReport = safeResult.reportMarkdown.replace(/\\n/g, '\n');
         break;
       } catch (err) {
         logger.error(`Error generating final report on attempt ${attempt + 1}`, { error: err });
@@ -480,7 +440,11 @@ Return the final report as a valid JSON object with a key "reportMarkdown" whose
       }
     }
     if (!finalReport) {
-      const formattedLearningsFallback = formattedLearnings;
+      const formattedLearningsFallback = learnings.map(l => {
+        const title = l.sourceTitle || "Fuente desconocida";
+        const url = (l.sourceUrl && l.sourceUrl !== "undefined") ? l.sourceUrl : (visitedUrls[0] || "URL not available");
+        return `- ${l.insight} ([${title}](${url}))`;
+      }).join('\n');
       finalReport = `# Informe de Investigación\n\nEntrada del Usuario: ${prompt}\n\nAprendizajes Clave:\n${formattedLearningsFallback}`;
     }
     return finalReport;
