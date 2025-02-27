@@ -6,11 +6,9 @@ import { RecursiveCharacterTextSplitter } from './text-splitter';
 import { logger, addTokenUsage } from '../api/utils/logger';
 
 const BASE_URL = 'https://api.venice.ai/api/v1';
-// VENICE_API_KEY is assumed to be set in environment variables.
 const VENICE_API_KEY = process.env.VENICE_API_KEY!;
 
-// Updated default context size to use full 131072 tokens.
-const defaultContextSize = process.env.CONTEXT_SIZE ? parseInt(process.env.CONTEXT_SIZE) : 131072;
+const defaultContextSize = process.env.CONTEXT_SIZE ? parseInt(process.env.CONTEXT_SIZE) : 120000;
 
 /**
  * Custom VeniceAI function to call Venice chat completions.
