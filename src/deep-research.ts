@@ -352,18 +352,24 @@ Required JSON format:
 }
 
 // NEW HELPER: Generate a report section using a dedicated API call.
+// Now includes a "urls" parameter that passes the verified list of URLs.
 async function generateReportSection(
   sectionTitle: string,
   sectionContext: string,
+  urls: string[],
   selectedModel?: string,
   language?: string,
 ): Promise<string> {
-  const promptText = `Please generate the "${sectionTitle}" section for a research report. The section should be detailed, structured, and professional. It must include inline citations in the format [Source Title](URL) for all key claims. Use the context provided below as input to guide your content.
+  const urlsJoined = urls.join('\n');
+  const promptText = `Please generate the "${sectionTitle}" section for a research report. The content of this section must be based exclusively on the following research findings and the verified URLs provided below. Use the context provided as input, and do not introduce any information unrelated to the research topic.
 
-Context:
+Research Context:
 ${sectionContext}
 
-Ensure that the output is a raw, valid JSON object with a key "section" whose value is the complete Markdown text for this section. Do not include any extra text or explanation.`;
+Verified URLs:
+${urlsJoined}
+
+Ensure that the output is a raw, valid JSON object with a key "section" whose value is the complete Markdown text for this section, including inline citations in the format [Source Title](URL) that refer only to the verified URLs above. Do not include any extra text or explanation.`;
   try {
     const res = await generateObjectSanitized({
       model: selectedModel ? createModel(selectedModel) : deepSeekModel,
@@ -414,13 +420,13 @@ export async function writeFinalReport({
     const executiveSummary = await generateSummary(insightsText, selectedModel);
 
     // Generate each report section via separate API calls.
-    const executiveSummarySection = await generateReportSection("Executive Summary", executiveSummary, selectedModel, language);
-    const introductionSection = await generateReportSection("Introduction", `User Input: "${prompt}"\n\nResearch Learnings with Sources:\n${formattedLearnings}`, selectedModel, language);
-    const methodologySection = await generateReportSection("Methodology", "Based on the research learnings and analysis process, describe the research methodology used including data collection, analytical methods, and critical evaluation of sources. Mention any limitations encountered.", selectedModel, language);
-    const keyInsightsSection = await generateReportSection("Key Insights", formattedLearnings, selectedModel, language);
-    const recommendationsSection = await generateReportSection("Recommendations", "Based on the research findings, provide actionable recommendations for future research and decision-making. Include any strategic considerations.", selectedModel, language);
-    const conclusionSection = await generateReportSection("Conclusion", "Summarize the overall research findings, implications, and final reflections.", selectedModel, language);
-    const referencesSection = await generateReportSection("References", "List all the sources cited in the report with their titles and URLs.", selectedModel, language);
+    const executiveSummarySection = await generateReportSection("Executive Summary", executiveSummary, visitedUrls, selectedModel, language);
+    const introductionSection = await generateReportSection("Introduction", `User Input: "${prompt}"\n\nResearch Learnings with Sources:\n${formattedLearnings}`, visitedUrls, selectedModel, language);
+    const methodologySection = await generateReportSection("Methodology", "Based on the research learnings and analysis process, describe the research methodology used including data collection, analytical methods, and critical evaluation of sources. Mention any limitations encountered.", visitedUrls, selectedModel, language);
+    const keyInsightsSection = await generateReportSection("Key Insights", formattedLearnings, visitedUrls, selectedModel, language);
+    const recommendationsSection = await generateReportSection("Recommendations", "Based on the research findings, provide actionable recommendations for future research and decision-making. Include any strategic considerations.", visitedUrls, selectedModel, language);
+    const conclusionSection = await generateReportSection("Conclusion", "Summarize the overall research findings, implications, and final reflections.", visitedUrls, selectedModel, language);
+    const referencesSection = await generateReportSection("References", "List all the sources cited in the report with their titles and URLs.", visitedUrls, selectedModel, language);
 
     const finalReportMarkdown = `${executiveSummarySection}\n\n${introductionSection}\n\n${methodologySection}\n\n${keyInsightsSection}\n\n${recommendationsSection}\n\n${conclusionSection}\n\n${referencesSection}`;
     return finalReportMarkdown;
