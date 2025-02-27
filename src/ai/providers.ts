@@ -8,7 +8,8 @@ import { logger, addTokenUsage } from '../api/utils/logger';
 const BASE_URL = 'https://api.venice.ai/api/v1';
 const VENICE_API_KEY = process.env.VENICE_API_KEY!;
 
-const defaultContextSize = process.env.CONTEXT_SIZE ? parseInt(process.env.CONTEXT_SIZE) : 120000;
+// Default context size is now 131072 tokens if not provided via env.
+const defaultContextSize = process.env.CONTEXT_SIZE ? parseInt(process.env.CONTEXT_SIZE) : 131072;
 
 /**
  * Custom VeniceAI function to call Venice chat completions.
@@ -48,7 +49,7 @@ function VeniceAI(model: string, options: any = {}) {
       model,
       venice_parameters: { include_venice_system_prompt: false },
       temperature: merged.temperature ?? 0.7,
-      max_tokens: maxTokens ?? 4096,
+      max_tokens: maxTokens ?? 8192,
       messages,
     };
 
