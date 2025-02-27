@@ -396,7 +396,12 @@ export async function writeFinalReport({
   relevantUrls?: string[];
 }) {
   try {
-    const formattedLearnings = learnings.map(l => `- ${l.insight} ([${l.sourceTitle}](${l.sourceUrl}))`).join('\n');
+    // Format each learning so that if sourceUrl is missing or "undefined", use the first visited URL as fallback (if available)
+    const formattedLearnings = learnings.map(l => {
+      const title = l.sourceTitle || "Fuente desconocida";
+      const url = (l.sourceUrl && l.sourceUrl !== "undefined") ? l.sourceUrl : (visitedUrls[0] || "URL not available");
+      return `- ${l.insight} ([${title}](${url}))`;
+    }).join('\n');
     const insightsText = learnings.map(l => l.insight).join('\n');
     const executiveSummary = await generateSummary(insightsText, selectedModel);
 
@@ -435,13 +440,21 @@ ${formattedLearnings}`;
       }
     }
     if (!finalReport) {
-      const formattedLearningsFallback = learnings.map(l => `- ${l.insight} ([${l.sourceTitle}](${l.sourceUrl}))`).join('\n');
+      const formattedLearningsFallback = learnings.map(l => {
+        const title = l.sourceTitle || "Fuente desconocida";
+        const url = (l.sourceUrl && l.sourceUrl !== "undefined") ? l.sourceUrl : (visitedUrls[0] || "URL not available");
+        return `- ${l.insight} ([${title}](${url}))`;
+      }).join('\n');
       finalReport = `# Informe de Investigación\n\nEntrada del Usuario: ${prompt}\n\nAprendizajes Clave:\n${formattedLearningsFallback}`;
     }
     return finalReport;
   } catch (error) {
     logger.error('Error generating final report', { error });
-    const formattedLearnings = learnings.map(l => `- ${l.insight} ([${l.sourceTitle}](${l.sourceUrl}))`).join('\n');
+    const formattedLearnings = learnings.map(l => {
+      const title = l.sourceTitle || "Fuente desconocida";
+      const url = (l.sourceUrl && l.sourceUrl !== "undefined") ? l.sourceUrl : (visitedUrls[0] || "URL not available");
+      return `- ${l.insight} ([${title}](${url}))`;
+    }).join('\n');
     return `# Informe de Investigación\n\nEntrada del Usuario: ${prompt}\n\nAprendizajes Clave:\n${formattedLearnings}`;
   }
 }
