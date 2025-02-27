@@ -351,7 +351,93 @@ Required JSON format:
   }
 }
 
-export async function generateSummary(content: string, selectedModel?: string): Promise<string> {
+// NEW HELPER: Generate a report section using a dedicated API call.
+async function generateReportSection(
+  sectionTitle: string,
+  sectionContext: string,
+  selectedModel?: string,
+  language?: string,
+): Promise<string> {
+  const promptText = `Please generate the "${sectionTitle}" section for a research report. The section should be detailed, structured, and professional. It must include inline citations in the format [Source Title](URL) for all key claims. Use the context provided below as input to guide your content.
+
+Context:
+${sectionContext}
+
+Ensure that the output is a raw, valid JSON object with a key "section" whose value is the complete Markdown text for this section. Do not include any extra text or explanation.`;
+  try {
+    const res = await generateObjectSanitized({
+      model: selectedModel ? createModel(selectedModel) : deepSeekModel,
+      system: reportPrompt(language || 'English'),
+      prompt: promptText,
+      schema: z.object({
+        section: z.string().describe('Markdown text for the section'),
+      }),
+      temperature: 0.6,
+      maxTokens: 8192,
+    });
+    return res.object.section;
+  } catch (error) {
+    logger.error(`Error generating section "${sectionTitle}"`, { error });
+    return `## ${sectionTitle}\n\n[No ${sectionTitle} generated due to an error.]`;
+  }
+}
+
+export async function writeFinalReport({
+  prompt,
+  learnings,
+  visitedUrls,
+  selectedModel,
+  language,
+  topUrls = [],
+  relevantUrls = [],
+}: {
+  prompt: string;
+  learnings: Array<{ insight: string; sourceTitle: string; sourceUrl: string }>;
+  visitedUrls: string[];
+  selectedModel?: string;
+  language?: string;
+  topUrls?: Array<{ url: string; description: string }>;
+  relevantUrls?: string[];
+}): Promise<string> {
+  try {
+    // Format each learning so that if sourceUrl is missing or "undefined", use the first visited URL as fallback (if available)
+    const formattedLearnings = learnings
+      .map(l => {
+        const title = l.sourceTitle || "Fuente desconocida";
+        const url = (l.sourceUrl && l.sourceUrl !== "undefined") ? l.sourceUrl : (visitedUrls[0] || "URL not available");
+        return `- ${l.insight} ([${title}](${url}))`;
+      })
+      .join('\n');
+    const insightsText = learnings.map(l => l.insight).join('\n');
+
+    // Generate an executive summary using the existing summary logic.
+    const executiveSummary = await generateSummary(insightsText, selectedModel);
+
+    // Generate each report section via separate API calls.
+    const executiveSummarySection = await generateReportSection("Executive Summary", executiveSummary, selectedModel, language);
+    const introductionSection = await generateReportSection("Introduction", `User Input: "${prompt}"\n\nResearch Learnings with Sources:\n${formattedLearnings}`, selectedModel, language);
+    const methodologySection = await generateReportSection("Methodology", "Based on the research learnings and analysis process, describe the research methodology used including data collection, analytical methods, and critical evaluation of sources. Mention any limitations encountered.", selectedModel, language);
+    const keyInsightsSection = await generateReportSection("Key Insights", formattedLearnings, selectedModel, language);
+    const recommendationsSection = await generateReportSection("Recommendations", "Based on the research findings, provide actionable recommendations for future research and decision-making. Include any strategic considerations.", selectedModel, language);
+    const conclusionSection = await generateReportSection("Conclusion", "Summarize the overall research findings, implications, and final reflections.", selectedModel, language);
+    const referencesSection = await generateReportSection("References", "List all the sources cited in the report with their titles and URLs.", selectedModel, language);
+
+    const finalReportMarkdown = `${executiveSummarySection}\n\n${introductionSection}\n\n${methodologySection}\n\n${keyInsightsSection}\n\n${recommendationsSection}\n\n${conclusionSection}\n\n${referencesSection}`;
+    return finalReportMarkdown;
+  } catch (error) {
+    logger.error('Error generating final report', { error });
+    const formattedLearningsFallback = learnings
+      .map(l => {
+        const title = l.sourceTitle || "Fuente desconocida";
+        const url = (l.sourceUrl && l.sourceUrl !== "undefined") ? l.sourceUrl : (visitedUrls[0] || "URL not available");
+        return `- ${l.insight} ([${title}](${url}))`;
+      })
+      .join('\n');
+    return `# Research Report\n\nUser Input: ${prompt}\n\nKey Learnings:\n${formattedLearningsFallback}`;
+  }
+}
+
+async function generateSummary(content: string, selectedModel?: string): Promise<string> {
   if (!content.trim()) {
     logger.warn('generateSummary called with empty content, returning empty summary');
     return '';
@@ -376,115 +462,6 @@ ${content}`;
     logger.error('Error generating summary', { error });
     return 'No se pudo generar el resumen ejecutivo debido a un error.';
   }
-}
-
-export async function writeFinalReport({
-  prompt,
-  learnings,
-  visitedUrls,
-  selectedModel,
-  language,
-  topUrls = [],
-  relevantUrls = [],
-}: {
-  prompt: string;
-  learnings: Array<{ insight: string; sourceTitle: string; sourceUrl: string }>;
-  visitedUrls: string[];
-  selectedModel?: string;
-  language?: string;
-  topUrls?: Array<{ url: string; description: string }>;
-  relevantUrls?: string[];
-}) {
-  try {
-    // Format each learning so that if sourceUrl is missing or "undefined", use the first visited URL as fallback (if available)
-    const formattedLearnings = learnings.map(l => {
-      const title = l.sourceTitle || "Fuente desconocida";
-      const url = (l.sourceUrl && l.sourceUrl !== "undefined") ? l.sourceUrl : (visitedUrls[0] || "URL not available");
-      return `- ${l.insight} ([${title}](${url}))`;
-    }).join('\n');
-    const insightsText = learnings.map(l => l.insight).join('\n');
-    const executiveSummary = await generateSummary(insightsText, selectedModel);
-
-    const promptText = `Executive Summary:
-${executiveSummary}
-
-User Input: "${prompt}"
-
-Research Learnings with Sources:
-${formattedLearnings}`;
-
-    const maxAttempts = 3;
-    let attempt = 0;
-    let finalReport = '';
-    while (attempt < maxAttempts) {
-      try {
-        const res = await generateObjectSanitized({
-          model: selectedModel ? createModel(selectedModel) : deepSeekModel,
-          system: reportPrompt(new Date().toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }), language || 'Spanish'),
-          prompt: promptText,
-          schema: z.object({
-            reportMarkdown: z.string().describe('Informe final sobre el tema en formato Markdown con saltos de línea explícitos'),
-          }),
-          temperature: 0.6,
-          maxTokens: 8192,
-        });
-        const safeResult = res.object as { reportMarkdown: string };
-        finalReport = safeResult.reportMarkdown.replace(/\\n/g, '\n');
-        break;
-      } catch (err) {
-        logger.error(`Error generating final report on attempt ${attempt + 1}`, { error: err });
-        attempt++;
-        if (attempt < maxAttempts) {
-          await new Promise(resolve => setTimeout(resolve, 3000));
-        }
-      }
-    }
-    if (!finalReport) {
-      const formattedLearningsFallback = learnings.map(l => {
-        const title = l.sourceTitle || "Fuente desconocida";
-        const url = (l.sourceUrl && l.sourceUrl !== "undefined") ? l.sourceUrl : (visitedUrls[0] || "URL not available");
-        return `- ${l.insight} ([${title}](${url}))`;
-      }).join('\n');
-      finalReport = `# Informe de Investigación\n\nEntrada del Usuario: ${prompt}\n\nAprendizajes Clave:\n${formattedLearningsFallback}`;
-    }
-    return finalReport;
-  } catch (error) {
-    logger.error('Error generating final report', { error });
-    const formattedLearnings = learnings.map(l => {
-      const title = l.sourceTitle || "Fuente desconocida";
-      const url = (l.sourceUrl && l.sourceUrl !== "undefined") ? l.sourceUrl : (visitedUrls[0] || "URL not available");
-      return `- ${l.insight} ([${title}](${url}))`;
-    }).join('\n');
-    return `# Informe de Investigación\n\nEntrada del Usuario: ${prompt}\n\nAprendizajes Clave:\n${formattedLearnings}`;
-  }
-}
-
-interface SerpCandidates {
-  finalTopUrls: Array<{ url: string; description: string }>;
-}
-
-async function finalizeTopRecommendations(
-  candidates: Array<{ url: string; description: string }>,
-  count: number,
-  selectedModel?: string,
-): Promise<Array<{ url: string; description: string }>> {
-  const promptText = `You are a research assistant tasked with selecting the final best recommendations from the following candidate recommendations. Consider quality, relevance, and reliability. Please select the final best ${count} recommendations.
-
-Candidate Recommendations:
-${JSON.stringify(candidates, null, 2)}
-
-Return the result as a JSON object with a key "finalTopUrls" that is an array of objects, each having "url" and "description".`;
-  const res = await generateObjectSanitized({
-    model: selectedModel ? createModel(selectedModel) : deepSeekModel,
-    system: systemPrompt(),
-    prompt: promptText,
-    schema: z.object({
-      finalTopUrls: z.array(z.object({ url: z.string(), description: z.string() })),
-    }),
-    temperature: 0.6,
-    maxTokens: 1000,
-  });
-  return res.object.finalTopUrls;
 }
 
 export async function deepResearch({
@@ -672,18 +649,17 @@ Query: "${query}"
 Example response format:
 {"questions": ["What specific aspects of this topic interest you most?", "Are you looking for current developments or historical context?", "What is your intended use case for this information?"], "language": "English"}`,
       schema: z.object({
-        questions: z.array(z.string()).min(1).max(numQuestions).describe('Preguntas de seguimiento para aclarar la dirección de la investigación'),
-        language: z.string().describe('Idioma detectado de la consulta del usuario'),
+        questions: z.array(z.string()).min(1).max(numQuestions).describe('Follow up questions to clarify the research direction'),
+        language: z.string().describe('Detected language of the user query'),
       }),
       maxTokens: 8192,
       temperature: 0.7,
     });
-
     const typedFeedback = userFeedback.object as FeedbackResponse;
-    logger.info('Feedback generado', { questions: typedFeedback.questions, language: typedFeedback.language });
+    logger.info('Feedback generated', { questions: typedFeedback.questions, language: typedFeedback.language });
     return { questions: typedFeedback.questions.slice(0, numQuestions), language: typedFeedback.language };
   } catch (error) {
-    logger.error('Error generando feedback', { error });
+    logger.error('Error generating feedback', { error });
     return fallback;
   }
 }
