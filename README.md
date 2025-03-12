@@ -81,6 +81,11 @@ SEARCH_SCRAPE_ENDPOINTS=google-twitter-scraper-london.vercel.app,google-twitter-
 
 > **Note:** If any of these variables are missing, the server may revert to defaults or encounter errors for certain features.
 
+### Aditional component config when deploying on Digital Ocean
+
+![image](https://github.com/user-attachments/assets/5657f87c-b60b-48f9-89eb-63e15ed2fdca)
+
+
 ### The Role of `VENICE_SUMMARIZATION_MODEL`
 
 When dealing with lengthy or highly fragmented text, the system may need to summarize or condense intermediate results before passing them to the main research model. This is where `VENICE_SUMMARIZATION_MODEL` comes into play:
