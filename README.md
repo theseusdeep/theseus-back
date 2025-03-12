@@ -61,6 +61,8 @@ Below is the complete list of environment variables that can be set for the back
 | **DATABASE_URL**               | Connection string for your Postgres database (e.g., Vercel Neon).                                                                                                                | `postgres://<username>:...`       |
 | **VENICE_SUMMARIZATION_MODEL** | (Optional) Model ID used for summarizing large texts before they are consumed by the main research model. Defaults to an LLM like `llama-3.2-3b`.                                 | `llama-3.2-3b`                    |
 | **CONTEXT_SIZE**               | The maximum context token size allowed for certain model calls.                                                                                                                  | `131072`                          |
+| **SEARCH_SCRAPE_ENDPOINTS**               | Scraping endpoints                                                                                                                | `google-twitter-scraper-london.vercel.app,google-twitter-scraper-stockholm.vercel.app,google-twitter-scraper-paris.vercel.app,google-twitter-scraper-dublin.vercel.app,google-twitter-scraper-frankfurt.vercel.app`                          |
+
 
 A sample `.env.local` might look like:
 
