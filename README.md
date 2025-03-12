@@ -76,6 +76,7 @@ PORT=8080
 DATABASE_URL=postgres://user:pass@hostname/db
 VENICE_SUMMARIZATION_MODEL=llama-3.2-3b
 CONTEXT_SIZE=131072
+SEARCH_SCRAPE_ENDPOINTS=google-twitter-scraper-london.vercel.app,google-twitter-scraper-stockholm.vercel.app,google-twitter-scraper-paris.vercel.app,google-twitter-scraper-dublin.vercel.app,google-twitter-scraper-frankfurt.vercel.app
 ```
 
 > **Note:** If any of these variables are missing, the server may revert to defaults or encounter errors for certain features.
